@@ -1,0 +1,29 @@
+{
+  "name": "notekabi",
+  "productName": "工作笔记",
+  "version": "1.1.0",
+  "description": "本地优先的个人工作笔记：快速记录、方便整理、便于回顾",
+  "main": "electron/main.cjs",
+  "author": "灰子",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "start": "electron .",
+    "dist": "node scripts/build-portable.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "latest",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

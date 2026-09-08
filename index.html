@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- 本地应用：资源全部来自本地文件，file:// 下放宽策略以保证正常加载 -->
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src * 'self' data: file: blob: 'unsafe-inline' 'unsafe-eval'; img-src * data: file: blob:; connect-src * data: file: blob:;" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>工作笔记</title>
+    <script>
+      // 记录早期脚本错误，便于排查白屏问题（可通过 window.__errors 读取）
+      window.__errors = []
+      window.addEventListener('error', function (e) {
+        window.__errors.push((e.message || 'error') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0))
+      })
+      window.addEventListener('unhandledrejection', function (e) {
+        window.__errors.push('unhandledrejection: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)))
+      })
+      // 提前应用主题，避免启动瞬间白屏闪烁
+      try {
+        var raw = localStorage.getItem('notekabi.settings')
+        if (raw) {
+          var s = JSON.parse(raw)
+          document.documentElement.setAttribute('data-theme', s.theme || 'light')
+          if (s.fontSize) document.documentElement.style.setProperty('--font-size', s.fontSize + 'px')
+        }
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-splash">
+        <div class="boot-logo">工作笔记</div>
+        <div class="boot-tip">正在加载笔记…</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
