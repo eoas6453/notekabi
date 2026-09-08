@@ -463,3 +463,50 @@ export function RandomDialog({
     </Dialog>
   )
 }
+
+// ---------------------------------------------------------------- 移动到文件夹
+export function MoveToDialog({
+  note,
+  folders,
+  onMove,
+  onClose,
+  onNew,
+}: {
+  note: Note | null
+  folders: { full: string; label: string }[]
+  onMove: (folder: string) => void
+  onClose: () => void
+  onNew: () => void
+}) {
+  if (!note) return <Dialog title="移动到文件夹" onClose={onClose}><div className="empty-hint">没有选中的笔记</div></Dialog>
+  return (
+    <Dialog title={`移动到文件夹 · 「${note.title || '无标题笔记'}」`} onClose={onClose}>
+      <div className="field-hint" style={{ marginBottom: 10 }}>
+        点选目标文件夹，笔记会加上对应标签（已是该文件夹标签则不重复加）。
+      </div>
+      <div className="move-list">
+        {folders.length === 0 && (
+          <div className="empty-hint">
+            还没有文件夹
+            <br />
+            <button className="btn" style={{ marginTop: 8 }} onClick={onNew}>
+              新建一个
+            </button>
+          </div>
+        )}
+        {folders.map((f) => (
+          <div
+            key={f.full}
+            className={`move-row ${note.tags.includes(f.full) ? 'active' : ''}`}
+            onClick={() => onMove(f.full)}
+          >
+            <span className="move-name">
+              {f.label}
+              {note.tags.includes(f.full) && <span className="move-tag">已在</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Dialog>
+  )
+}

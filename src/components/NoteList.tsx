@@ -26,6 +26,8 @@ interface Props {
   emptyText: string
   /** 列表呈现形式：行式列表 或 边上的卡片网格 */
   mode?: 'list' | 'cards'
+  /** 右键单条笔记 → 移动到文件夹 */
+  onMoveTo?: (noteId: string) => void
 }
 
 /** 高亮文本片段 */
@@ -64,7 +66,16 @@ export default function NoteList(p: Props) {
     const n = it.note
     const active = n.id === p.currentId
     return (
-      <div key={n.id} className={`note-item ${active ? 'active' : ''}`} onClick={() => p.onOpen(n.id)}>
+      <div
+        key={n.id}
+        className={`note-item ${active ? 'active' : ''}`}
+        onClick={() => p.onOpen(n.id)}
+        onContextMenu={(e) => {
+          if (!p.onMoveTo) return
+          e.preventDefault()
+          p.onMoveTo(n.id)
+        }}
+      >
         <div className="note-item-top">
           <div className="note-item-title">
             <HL text={n.title || '未命名笔记'} terms={it.terms} />
@@ -94,7 +105,16 @@ export default function NoteList(p: Props) {
     const n = it.note
     const active = n.id === p.currentId
     return (
-      <div key={n.id} className={`note-card ${active ? 'active' : ''}`} onClick={() => p.onOpen(n.id)}>
+      <div
+        key={n.id}
+        className={`note-card ${active ? 'active' : ''}`}
+        onClick={() => p.onOpen(n.id)}
+        onContextMenu={(e) => {
+          if (!p.onMoveTo) return
+          e.preventDefault()
+          p.onMoveTo(n.id)
+        }}
+      >
         <div className="note-card-top">
           <div className="note-card-title">
             <HL text={n.title || '未命名笔记'} terms={it.terms} />

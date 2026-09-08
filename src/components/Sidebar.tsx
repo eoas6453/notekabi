@@ -1,4 +1,5 @@
 import type { Note, ViewKey } from '../types'
+import type { ReactNode } from 'react'
 
 interface Props {
   view: ViewKey
@@ -16,6 +17,8 @@ interface Props {
   onOpenStorage: () => void
   isElectron: boolean
   pendingCount?: number
+  /** 收纳（文件夹）树节点，由父组件注入 */
+  folderTree?: ReactNode
 }
 
 const NAV: { key: ViewKey; icon: string; label: string }[] = [
@@ -93,6 +96,12 @@ export default function Sidebar(p: Props) {
             </button>
           ))}
         </div>
+        {p.folderTree && (
+          <>
+            <div className="nav-label" style={{ marginTop: 12 }}>收纳（文件夹）</div>
+            <div className="sidebar-folders">{p.folderTree}</div>
+          </>
+        )}
       </div>
 
       <div className="sidebar-foot">

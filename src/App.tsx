@@ -5,9 +5,19 @@ import { deriveTitle, extractLinks, newId } from './lib/note'
 import { searchNotes } from './lib/search'
 import { dailyTitleText, renderTemplate } from './lib/templates'
 import { dailyTitle, toDateKey } from './lib/date'
+import { formatTimeAgo } from './lib/timeago'
+import {
+  buildFolderTree,
+  deleteFolder as deleteFolderTag,
+  flattenFolders,
+  isValidFolderName,
+  mergeFolder as mergeFolderTag,
+  renameFolder as renameFolderTag,
+} from './lib/folder'
 import { pendingReminders } from './lib/calendar'
 import { buildPrintHtml, noteToMarkdown, notesToDocx, notesToMarkdownZip } from './lib/export'
 import Sidebar from './components/Sidebar'
+import FolderTree from './components/FolderTree'
 import NoteList, { type ListItem } from './components/NoteList'
 import EditorPane, { type EditorMode } from './components/EditorPane'
 import PrintView from './components/PrintView'
@@ -15,6 +25,7 @@ import { GraphView, KanbanView } from './components/Views'
 import { CalendarView } from './components/CalendarView'
 import {
   Dialog,
+  MoveToDialog,
   RandomDialog,
   SettingsDialog,
   ShortcutsDialog,
@@ -67,8 +78,9 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [dialog, setDialog] = useState<
-    null | 'settings' | 'stats' | 'template' | 'shortcuts' | 'trash' | 'random' | 'export'
+    null | 'settings' | 'stats' | 'template' | 'shortcuts' | 'trash' | 'random' | 'export' | 'move'
   >(null)
+  const [moveTarget, setMoveTarget] = useState<Note | null>(null)
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([])
   const [printJob, setPrintJob] = useState<{ html: string; name: string } | null>(null)
   const [showBacklinks, setShowBacklinks] = useState(true)
@@ -77,6 +89,11 @@ export default function App() {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [assetMap, setAssetMap] = useState<Record<string, string>>({})
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
+  const [freshlyCreated, setFreshlyCreated] = useState(false)
+  /** 当前选中的文件夹（精确路径，如"工作/项目A"），null = 不按文件夹筛选 */
+  const [activeFolder, setActiveFolder] = useState<string | null>(null)
+  /** 是否在按文件夹筛选时包含子文件夹的笔记 */
+  const [includeSubfolders, setIncludeSubfolders] = useState(true)
 
   const searchRef = useRef<HTMLInputElement>(null)
   const pendingRef = useRef<Note | null>(null)
@@ -233,6 +250,13 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', h)
   }, [flushSave])
 
+  // 每秒刷新一次状态栏的「x 秒前」，让用户看到保存时间在动
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+
   // ---------------------------------------------------------------- 笔记操作
   const current = useMemo(() => notes.find((n) => n.id === currentId) || null, [notes, currentId])
 
@@ -272,6 +296,7 @@ export default function App() {
       setView('all')
       setQuery('')
       setActiveTags([])
+      setFreshlyCreated(true)
       scheduleSave(note)
       return note
     },
@@ -391,6 +416,112 @@ export default function App() {
     return [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count }))
   }, [notes])
 
+  /** 所有用过的标签（含斜杠嵌套的文件夹路径），去重 */
+  const allFolderTags = useMemo(
+    () => Array.from(new Set(notes.flatMap((n) => n.tags))).sort((a, b) => a.localeCompare(b, 'zh')),
+    [notes],
+  )
+  const folderTree = useMemo(() => buildFolderTree(allFolderTags), [allFolderTags])
+
+  /** 把指定旧标签全量重命名为新名（含所有笔记的 tags 数组） */
+  const renameFolder = useCallback(
+    (oldFull: string) => {
+      const next = window.prompt(`把文件夹「${oldFull}」重命名为：`, oldFull.split('/').pop())
+      if (!next || !isValidFolderName(next) || next === oldFull) {
+        if (next && !isValidFolderName(next)) toast('文件夹名非法（不可含 \\:*?"<>|，每段不能为空）')
+        return
+      }
+      const newFull = oldFull.includes('/') ? oldFull.replace(/[^/]+$/, next) : next
+      if (newFull === oldFull) return
+      setNotes((ns) =>
+        ns.map((n) => ({ ...n, tags: renameFolderTag(n.tags, oldFull, newFull) })),
+      )
+      // 落盘（每篇笔记都要写）
+      notes.forEach((n) => {
+        if (n.tags.includes(oldFull)) scheduleSave({ ...n, tags: renameFolderTag(n.tags, oldFull, newFull) })
+      })
+      if (activeFolder === oldFull) setActiveFolder(newFull)
+      toast(`已重命名为「${newFull}」`)
+    },
+    [notes, activeFolder, toast],
+  )
+
+  const deleteFolder = useCallback(
+    (folder: string) => {
+      if (!confirm(`删除文件夹「${folder}」？\n笔记不会被删除，但该文件夹内的笔记会失去这个标签。`)) return
+      setNotes((ns) =>
+        ns.map((n) => ({ ...n, tags: deleteFolderTag(n.tags, folder) })),
+      )
+      notes.forEach((n) => {
+        if (n.tags.includes(folder)) scheduleSave({ ...n, tags: deleteFolderTag(n.tags, folder) })
+      })
+      if (activeFolder === folder) setActiveFolder(null)
+      toast(`已删除文件夹「${folder}」`)
+    },
+    [notes, activeFolder, toast],
+  )
+
+  const mergeFolder = useCallback(
+    (fromFull: string) => {
+      const toFull = window.prompt(`把「${fromFull}」合并到哪个文件夹？\n（输入完整路径，例如「${fromFull.split('/').slice(0, -1).concat(['其他']).join('/')}」）`)
+      if (!toFull || !isValidFolderName(toFull) || toFull === fromFull) {
+        if (toFull && !isValidFolderName(toFull)) toast('文件夹名非法（不可含 \\:*?"<>|，每段不能为空）')
+        return
+      }
+      setNotes((ns) => ns.map((n) => ({ ...n, tags: mergeFolderTag(n.tags, fromFull, toFull) })))
+      notes.forEach((n) => {
+        if (n.tags.includes(fromFull)) scheduleSave({ ...n, tags: mergeFolderTag(n.tags, fromFull, toFull) })
+      })
+      toast(`已合并「${fromFull}」到「${toFull}」`)
+    },
+    [notes, toast],
+  )
+
+  /** 新建文件夹：只是新建一个标签，等用户去标签里给笔记挂上。
+   *  「parent」为空 = 根目录新建；否则创建 parent 的子目录 */
+  const createFolder = useCallback(
+    (parent: string | null) => {
+      const name = window.prompt(parent ? `在「${parent}」下新建子文件夹：` : '新建文件夹：')
+      if (!name) return
+      const full = parent ? `${parent}/${name.trim()}` : name.trim()
+      if (!isValidFolderName(full)) {
+        toast('文件夹名非法（不可含 \\:*?"<>|，每段不能为空）')
+        return
+      }
+      // 已存在则激活
+      if (allFolderTags.includes(full)) {
+        setActiveFolder(full)
+        toast(`「${full}」已存在，已为你选中`)
+        return
+      }
+      setActiveFolder(full)
+      toast(`已新建文件夹「${full}」，把笔记的标签设成「${full}」即可收纳进来`)
+    },
+    [allFolderTags, toast],
+  )
+
+  const flatFolders = useMemo(() => flattenFolders(folderTree), [folderTree])
+
+  /** 把指定笔记「移入」某个文件夹：往 tags 加 folder（已在就不重加） */
+  const moveNoteToFolder = useCallback(
+    (noteId: string, folder: string) => {
+      const target = notes.find((n) => n.id === noteId)
+      if (!target) return
+      if (target.tags.includes(folder)) {
+        toast(`已在「${folder}」中`)
+        setDialog(null)
+        setMoveTarget(null)
+        return
+      }
+      const next = [...target.tags, folder]
+      updateNote(noteId, { tags: next })
+      toast(`已移入「${folder}」`)
+      setDialog(null)
+      setMoveTarget(null)
+    },
+    [notes, updateNote, toast],
+  )
+
   const knownTitles = useMemo(() => new Set(notes.map((n) => n.title.trim().toLowerCase())), [notes])
 
   // 待提醒（今日/逾期未完成）
@@ -401,6 +532,13 @@ export default function App() {
     if (view === 'favorite') pool = pool.filter((n) => n.favorite)
     if (view === 'daily') pool = pool.filter((n) => n.type === 'daily')
     if (activeTags.length) pool = pool.filter((n) => activeTags.every((t) => n.tags.includes(t)))
+    if (activeFolder) {
+      pool = pool.filter((n) =>
+        n.tags.some((t) =>
+          t === activeFolder || (includeSubfolders && t.startsWith(activeFolder + '/')),
+        ),
+      )
+    }
 
     if (query.trim()) {
       return searchNotes(pool, query).map((h) => ({ note: h.note, terms: h.terms, snippet: h.snippet }))
@@ -413,7 +551,7 @@ export default function App() {
       return +new Date(b.updated) - +new Date(a.updated)
     })
     return sorted.map((n) => ({ note: n, terms: [] }))
-  }, [notes, view, activeTags, query, settings.sortBy])
+  }, [notes, view, activeTags, activeFolder, includeSubfolders, query, settings.sortBy])
 
   const highlightTerms = useMemo(() => {
     if (!query.trim()) return []
@@ -661,6 +799,19 @@ export default function App() {
           onOpenStorage={() => isElectron && api.openStorage()}
           isElectron={isElectron}
           pendingCount={pendingEvents.length}
+          folderTree={
+            <FolderTree
+              nodes={folderTree}
+              activeFolder={activeFolder}
+              onSelect={setActiveFolder}
+              onRename={renameFolder}
+              onDelete={deleteFolder}
+              onMerge={mergeFolder}
+              onNewSub={createFolder}
+              includeSubfolders={includeSubfolders}
+              onToggleIncludeSubfolders={() => setIncludeSubfolders((v) => !v)}
+            />
+          }
         />
       )}
 
@@ -686,6 +837,13 @@ export default function App() {
                 ? '当前标签下没有笔记'
                 : '还没有笔记，按 Ctrl + N 开始记录'
           }
+          onMoveTo={(id) => {
+            const target = notes.find((n) => n.id === id)
+            if (target) {
+              setMoveTarget(target)
+              setDialog('move')
+            }
+          }}
         />
       )}
 
@@ -730,6 +888,8 @@ export default function App() {
           onRemoveTag={(t) => updateNote(current.id, { tags: current.tags.filter((x) => x !== t) })}
           showBacklinks={showBacklinks}
           onToggleBacklinks={() => setShowBacklinks((s) => !s)}
+          freshlyCreated={freshlyCreated}
+          onFreshlyConsumed={() => setFreshlyCreated(false)}
         />
       ) : (
         <div className="main-pane">
@@ -756,8 +916,14 @@ export default function App() {
         }}
       >
         <span>
-          <span className={`save-dot ${saving ? 'dirty' : ''}`} />
-          {saving ? '正在保存…' : savedAt ? `已保存 ${new Date(savedAt).toLocaleTimeString('zh-CN')}` : '自动保存已开启'}
+          <span className={`save-dot ${saving ? 'dirty' : pendingRef.current ? 'pending' : ''}`} />
+          {saving
+            ? '正在保存…'
+            : pendingRef.current
+              ? '有改动，0.8 秒后保存'
+              : savedAt
+                ? `已保存 ${formatTimeAgo(savedAt)}`
+                : '自动保存已开启'}
         </span>
         <span>共 {notes.length} 篇</span>
         <span className="layout-group" role="group" aria-label="界面布局">
@@ -889,6 +1055,23 @@ export default function App() {
           </div>
           <div className="field-hint">Word 导出会保留标题、列表、表格、代码块等基本格式；PDF 使用内置打印引擎生成。</div>
         </Dialog>
+      )}
+
+      {dialog === 'move' && (
+        <MoveToDialog
+          note={moveTarget}
+          folders={flatFolders}
+          onMove={(folder) => moveTarget && moveNoteToFolder(moveTarget.id, folder)}
+          onClose={() => {
+            setDialog(null)
+            setMoveTarget(null)
+          }}
+          onNew={() => {
+            setDialog(null)
+            setMoveTarget(null)
+            createFolder(null)
+          }}
+        />
       )}
 
       {printJob && (
