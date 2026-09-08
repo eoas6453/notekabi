@@ -470,6 +470,33 @@ function createWindow() {
         // 清理该事件
         await fsp.writeFile(path.join(storageRoot, EVENTS_FILE), '[]\n', 'utf8').catch(() => {})
 
+        // ⑦ 布局切换：侧栏 / 列表 / 卡片 实时开关（验证 DOM 随之变化）
+        const clickByTitle = async (kw) => {
+          const ok = await exec(`(function(){
+            const b = Array.from(document.querySelectorAll('.layout-group .icon-btn')).find((x) => (x.title || '').includes(${JSON.stringify(kw)}))
+            if (b) { b.click(); return true }
+            return false
+          })()`)
+          await wait(260)
+          return ok
+        }
+        steps['7_layout'] = {}
+        steps['7_layout'].hasLayoutGroup = await exec(`!!document.querySelector('.layout-group')`)
+        // 卡片模式
+        steps['7_layout'].cardsClicked = await clickByTitle('卡片')
+        steps['7_layout'].cardsOn = await exec(`!!document.querySelector('.note-cards') && !!document.querySelector('.list-pane.cards')`)
+        // 隐藏侧栏
+        steps['7_layout'].sidebarClicked = await clickByTitle('侧边栏')
+        steps['7_layout'].sidebarHidden = await exec(`!document.querySelector('.sidebar')`)
+        // 隐藏列表
+        steps['7_layout'].listClicked = await clickByTitle('笔记列表')
+        steps['7_layout'].listHidden = await exec(`!document.querySelector('.list-pane')`)
+        // 还原默认布局（再点一次恢复），避免污染用户 settings.json
+        await clickByTitle('笔记列表')
+        await clickByTitle('侧边栏')
+        await clickByTitle('卡片')
+        steps['7_layout'].restored = await exec(`!!document.querySelector('.sidebar') && !!document.querySelector('.list-pane') && !document.querySelector('.note-cards')`)
+
         steps.ok = true
 
         // 清理自检产生的数据
