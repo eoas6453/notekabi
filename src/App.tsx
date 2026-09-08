@@ -184,6 +184,22 @@ export default function App() {
     [appInfo, toast],
   )
 
+  /** 更新布局偏好（侧栏 / 列表可见性、列表形式） */
+  const setLayout = useCallback(
+    (patch: Partial<Settings['layout']>) => {
+      setSettings((s) => ({
+        ...s,
+        layout: { ...s.layout, ...patch },
+      }))
+      try {
+        api.setSettings({ layout: { ...settings.layout, ...patch } } as Partial<Settings>).catch(() => {})
+      } catch (e) {
+        console.error(e)
+      }
+    },
+    [settings.layout, toast],
+  )
+
   // ---------------------------------------------------------------- 自动保存
   const flushSave = useCallback(async () => {
     const note = pendingRef.current
@@ -544,6 +560,19 @@ export default function App() {
     } else if (mod && e.shiftKey && key === 'f') {
       e.preventDefault()
       updateSettings({ focusMode: !settings.focusMode })
+    } else if (mod && e.shiftKey && key === 'b') {
+      e.preventDefault()
+      setLayout({ sidebar: !settings.layout.sidebar })
+    } else if (mod && e.shiftKey && key === 'l') {
+      e.preventDefault()
+      setLayout({ list: !settings.layout.list })
+    } else if (mod && e.shiftKey && key === 'm') {
+      e.preventDefault()
+      if (settings.layout.list) {
+        setLayout({ listStyle: settings.layout.listStyle === 'cards' ? 'list' : 'cards' })
+      } else {
+        setLayout({ list: true, listStyle: 'cards' })
+      }
     } else if (mod && key === ',') {
       e.preventDefault()
       setDialog('settings')
@@ -598,58 +627,67 @@ export default function App() {
   const isElectron = !!appInfo?.isElectron
   const storagePath = settings.storagePath || appInfo?.storagePath || ''
 
+  // 布局可见性：专注模式（纯笔记）下隐藏所有左栏；否则按 layout 偏好
+  const showSidebar = !settings.focusMode && settings.layout.sidebar
+  const showList = !settings.focusMode && settings.layout.list
+
   return (
     <div className={`app ${settings.focusMode ? 'focus-mode' : ''}`}>
-      <Sidebar
-        view={view}
-        onView={(v) => {
-          if (v === 'stats') setDialog('stats')
-          else if (v === 'trash') setDialog('trash')
-          else setView(v)
-        }}
-        counts={{
-          all: notes.length,
-          favorite: notes.filter((n) => n.favorite).length,
-          daily: notes.filter((n) => n.type === 'daily').length,
-          calendar: pendingEvents.length,
-        }}
-        tags={tagStats}
-        activeTags={activeTags}
-        onToggleTag={(t) =>
-          setActiveTags((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]))
-        }
-        onNew={() => createNote()}
-        onTemplate={() => setDialog('template')}
-        onDaily={() => void openDaily()}
-        onRandom={openRandom}
-        onSettings={() => setDialog('settings')}
-        storagePath={storagePath || '本地存储'}
-        onOpenStorage={() => isElectron && api.openStorage()}
-        isElectron={isElectron}
-        pendingCount={pendingEvents.length}
-      />
+      {showSidebar && (
+        <Sidebar
+          view={view}
+          onView={(v) => {
+            if (v === 'stats') setDialog('stats')
+            else if (v === 'trash') setDialog('trash')
+            else setView(v)
+          }}
+          counts={{
+            all: notes.length,
+            favorite: notes.filter((n) => n.favorite).length,
+            daily: notes.filter((n) => n.type === 'daily').length,
+            calendar: pendingEvents.length,
+          }}
+          tags={tagStats}
+          activeTags={activeTags}
+          onToggleTag={(t) =>
+            setActiveTags((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]))
+          }
+          onNew={() => createNote()}
+          onTemplate={() => setDialog('template')}
+          onDaily={() => void openDaily()}
+          onRandom={openRandom}
+          onSettings={() => setDialog('settings')}
+          storagePath={storagePath || '本地存储'}
+          onOpenStorage={() => isElectron && api.openStorage()}
+          isElectron={isElectron}
+          pendingCount={pendingEvents.length}
+        />
+      )}
 
-      <NoteList
-        items={listItems}
-        currentId={currentId}
-        onOpen={openNote}
-        query={query}
-        onQuery={setQuery}
-        sortBy={settings.sortBy}
-        onSort={(s) => updateSettings({ sortBy: s as Settings['sortBy'] })}
-        activeTags={activeTags}
-        onClearTag={(t) => setActiveTags((ts) => ts.filter((x) => x !== t))}
-        onClearAll={() => setActiveTags([])}
-        searchRef={searchRef}
-        group={view === 'all' && !query}
-        emptyText={
-          query
-            ? '没有匹配的笔记，试试其它关键词'
-            : activeTags.length
-              ? '当前标签下没有笔记'
-              : '还没有笔记，按 Ctrl + N 开始记录'
-        }
-      />
+      {showList && (
+        <NoteList
+          items={listItems}
+          currentId={currentId}
+          onOpen={openNote}
+          query={query}
+          onQuery={setQuery}
+          sortBy={settings.sortBy}
+          onSort={(s) => updateSettings({ sortBy: s as Settings['sortBy'] })}
+          activeTags={activeTags}
+          onClearTag={(t) => setActiveTags((ts) => ts.filter((x) => x !== t))}
+          onClearAll={() => setActiveTags([])}
+          searchRef={searchRef}
+          group={view === 'all' && !query}
+          mode={settings.layout.listStyle}
+          emptyText={
+            query
+              ? '没有匹配的笔记，试试其它关键词'
+              : activeTags.length
+                ? '当前标签下没有笔记'
+                : '还没有笔记，按 Ctrl + N 开始记录'
+          }
+        />
+      )}
 
       {view === 'graph' ? (
         <GraphView notes={notes} currentId={currentId} onOpen={openNote} />
@@ -722,6 +760,39 @@ export default function App() {
           {saving ? '正在保存…' : savedAt ? `已保存 ${new Date(savedAt).toLocaleTimeString('zh-CN')}` : '自动保存已开启'}
         </span>
         <span>共 {notes.length} 篇</span>
+        <span className="layout-group" role="group" aria-label="界面布局">
+          <button
+            className={`icon-btn ${settings.focusMode ? 'active' : ''}`}
+            title="纯笔记（专注模式，Ctrl+Shift+F）"
+            onClick={() => updateSettings({ focusMode: !settings.focusMode })}
+          >
+            ⛶
+          </button>
+          <button
+            className={`icon-btn ${settings.layout.sidebar ? 'active' : ''}`}
+            title="侧边栏（Ctrl+Shift+B）"
+            onClick={() => setLayout({ sidebar: !settings.layout.sidebar })}
+          >
+            🧭
+          </button>
+          <button
+            className={`icon-btn ${settings.layout.list ? 'active' : ''}`}
+            title="笔记列表（Ctrl+Shift+L）"
+            onClick={() => setLayout({ list: !settings.layout.list })}
+          >
+            📋
+          </button>
+          <button
+            className={`icon-btn ${settings.layout.listStyle === 'cards' ? 'active' : ''}`}
+            title="列表以卡片展示（Ctrl+Shift+M）"
+            disabled={!settings.layout.list}
+            onClick={() =>
+              setLayout({ listStyle: settings.layout.listStyle === 'cards' ? 'list' : 'cards' })
+            }
+          >
+            ▦
+          </button>
+        </span>
         <span className="spacer" />
         <span>{isElectron ? '本地运行 · 无需联网' : '浏览器预览模式'}</span>
         <button className="icon-btn" title="快捷键说明" onClick={() => setDialog('shortcuts')}>

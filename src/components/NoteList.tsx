@@ -24,6 +24,8 @@ interface Props {
   searchRef: React.RefObject<HTMLInputElement>
   group: boolean
   emptyText: string
+  /** 列表呈现形式：行式列表 或 边上的卡片网格 */
+  mode?: 'list' | 'cards'
 }
 
 /** 高亮文本片段 */
@@ -87,8 +89,40 @@ export default function NoteList(p: Props) {
     )
   }
 
+  /** 卡片形式：笔记以网格卡片排布在侧边 */
+  const renderCard = (it: ListItem) => {
+    const n = it.note
+    const active = n.id === p.currentId
+    return (
+      <div key={n.id} className={`note-card ${active ? 'active' : ''}`} onClick={() => p.onOpen(n.id)}>
+        <div className="note-card-top">
+          <div className="note-card-title">
+            <HL text={n.title || '未命名笔记'} terms={it.terms} />
+          </div>
+          <div className="note-card-date">{formatRelative(n.updated)}</div>
+        </div>
+        <div className="note-card-excerpt">
+          <HL text={it.snippet || makeExcerpt(n.content, 140) || '空白笔记'} terms={it.terms} />
+        </div>
+        {(n.tags.length > 0 || n.pinned || n.favorite) && (
+          <div className="note-card-foot">
+            {n.pinned && <span className="mini-flag" title="置顶">📌</span>}
+            {n.favorite && <span className="mini-flag" title="收藏">⭐</span>}
+            {n.tags.slice(0, 4).map((t) => (
+              <span key={t} className="mini-tag">
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const isCards = p.mode === 'cards'
+
   return (
-    <div className="list-pane">
+    <div className={`list-pane ${isCards ? 'cards' : ''}`}>
       <div className="list-head">
         <div className="search-box">
           <span className="ico">🔍</span>
@@ -132,14 +166,20 @@ export default function NoteList(p: Props) {
 
       <div className="note-list">
         {p.items.length === 0 && <div className="empty-hint">{p.emptyText}</div>}
-        {grouped
-          ? grouped.map(([label, list]) => (
-              <div key={label}>
-                <div className="group-label">{label}</div>
-                {list.map(renderItem)}
-              </div>
-            ))
-          : p.items.map(renderItem)}
+        {isCards ? (
+          <div className="note-cards">
+            {p.items.map(renderCard)}
+          </div>
+        ) : grouped ? (
+          grouped.map(([label, list]) => (
+            <div key={label}>
+              <div className="group-label">{label}</div>
+              {list.map(renderItem)}
+            </div>
+          ))
+        ) : (
+          p.items.map(renderItem)
+        )}
       </div>
     </div>
   )

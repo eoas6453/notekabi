@@ -123,6 +123,51 @@ export function SettingsDialog({
       </div>
 
       <div className="field">
+        <span className="field-label">界面布局</span>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={local.layout.sidebar}
+            onChange={(e) => {
+              const next = { ...local.layout, sidebar: e.target.checked }
+              setLocal({ ...local, layout: next })
+              onSave({ layout: next })
+            }}
+          />
+          <span>显示侧边栏导航</span>
+        </label>
+        <label className="check-row" style={{ marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={local.layout.list}
+            onChange={(e) => {
+              const next = { ...local.layout, list: e.target.checked }
+              setLocal({ ...local, layout: next })
+              onSave({ layout: next })
+            }}
+          />
+          <span>显示笔记列表</span>
+        </label>
+        <label className="check-row" style={{ marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={local.layout.listStyle === 'cards'}
+            disabled={!local.layout.list}
+            onChange={(e) => {
+              const next = { ...local.layout, listStyle: (e.target.checked ? 'cards' : 'list') as 'cards' | 'list' }
+              setLocal({ ...local, layout: next })
+              onSave({ layout: next })
+            }}
+          />
+          <span>笔记列表以卡片网格展示</span>
+        </label>
+        <div className="field-hint">
+          也可在底部状态栏用按钮实时切换，或用快捷键 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>（侧栏）/
+          <kbd>L</kbd>（列表）/ <kbd>M</kbd>（卡片）。
+        </div>
+      </div>
+
+      <div className="field">
         <span className="field-label">启动提醒</span>
         <label className="check-row">
           <input
@@ -312,7 +357,10 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     ['随机回顾', 'Ctrl + R'],
     ['保存（自动保存，可手动触发）', 'Ctrl + S'],
     ['切换 编辑 / 分屏 / 预览', 'Ctrl + E'],
-    ['专注模式', 'Ctrl + Shift + F'],
+    ['专注模式（纯笔记）', 'Ctrl + Shift + F'],
+    ['显示 / 隐藏侧边栏', 'Ctrl + Shift + B'],
+    ['显示 / 隐藏笔记列表', 'Ctrl + Shift + L'],
+    ['列表：卡片 / 行式切换', 'Ctrl + Shift + M'],
     ['加粗 / 斜体', 'Ctrl + B / Ctrl + I'],
     ['删除当前笔记', 'Ctrl + Delete'],
     ['设置', 'Ctrl + ,'],

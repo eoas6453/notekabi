@@ -25,6 +25,14 @@ export interface NoteMeta {
   words: number
 }
 
+/** 界面布局偏好：侧栏 / 笔记列表是否可见，列表以何种形式呈现 */
+export interface LayoutPref {
+  sidebar: boolean
+  list: boolean
+  /** 列表呈现形式：行式列表 或 边上的卡片网格 */
+  listStyle: 'list' | 'cards'
+}
+
 export interface Settings {
   theme: 'light' | 'dark'
   fontSize: number
@@ -35,6 +43,7 @@ export interface Settings {
   dailyTemplate: string
   /** 启动时提醒今日/逾期的待办节点 */
   remindOnStart: boolean
+  layout: LayoutPref
 }
 
 export type EventKind = 'milestone' | 'reminder'

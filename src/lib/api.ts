@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS: Settings = {
   focusMode: false,
   dailyTemplate: 'daily',
   remindOnStart: true,
+  layout: { sidebar: true, list: true, listStyle: 'list' },
 }
 
 function lsGet<T>(key: string, fallback: T): T {

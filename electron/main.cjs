@@ -59,6 +59,7 @@ const DEFAULT_SETTINGS = {
   focusMode: false,
   dailyTemplate: 'daily',
   remindOnStart: true,
+  layout: { sidebar: true, list: true, listStyle: 'list' },
 }
 
 async function readSettings() {
