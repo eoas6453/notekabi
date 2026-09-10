@@ -346,6 +346,36 @@ select {
   font-family: inherit;
 }
 
+/* 编辑器里的「所属文件夹」徽标 */
+.folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folder-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.folder-chip.empty {
+  border-style: dashed;
+  color: var(--text-faint);
+}
+.folder-chip .chip-act {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
 /* ---------------------------------------------------------------- 可折叠分组 */
 .nav-group.collapsed {
   padding-bottom: 2px;

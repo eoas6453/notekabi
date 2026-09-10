@@ -1000,6 +1000,11 @@ export default function App() {
             if (!current.tags.includes(t)) updateNote(current.id, { tags: [...current.tags, t] })
           }}
           onRemoveTag={(t) => updateNote(current.id, { tags: current.tags.filter((x) => x !== t) })}
+          folderName={folders.find((f) => f.id === (current.folder || ''))?.name || ''}
+          onMoveToFolder={() => {
+            setMoveTarget(current)
+            setDialog('move')
+          }}
           showBacklinks={showBacklinks}
           onToggleBacklinks={() => setShowBacklinks((s) => !s)}
           freshlyCreated={freshlyCreated}

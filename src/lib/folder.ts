@@ -58,6 +58,24 @@ export function buildFolderTree(folders: Folder[], counts: Record<string, number
     return oa - ob || String(a.name).localeCompare(String(b.name), 'zh')
   })
 
+  // 断开成环的父子链：沿 parentId 往上走，若绕回自己或走进已访问节点，就把该节点提到根级。
+  // 否则环里的节点既挂不到根上、也不会被任何父节点引用，会在界面上凭空消失。
+  const byRawId = new Map<string, Folder>()
+  list.forEach((f) => byRawId.set(f.id, f))
+  list.forEach((f) => {
+    const seen = new Set<string>()
+    let cur: Folder | undefined = f
+    let guard = 0
+    while (cur && cur.parentId && guard++ < 500) {
+      if (cur.parentId === f.id || seen.has(cur.parentId)) {
+        f.parentId = null
+        break
+      }
+      seen.add(cur.parentId)
+      cur = byRawId.get(cur.parentId)
+    }
+  })
+
   const byId = new Map<string, FolderNode>()
   list.forEach((f) => {
     byId.set(f.id, {

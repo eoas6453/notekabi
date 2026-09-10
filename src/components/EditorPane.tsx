@@ -28,6 +28,10 @@ interface Props {
   onOpenTitle: (title: string) => void
   onAddTag: (t: string) => void
   onRemoveTag: (t: string) => void
+  /** 当前笔记所在文件夹名（空 = 未归类） */
+  folderName?: string
+  /** 点击文件夹徽标：打开「移动到文件夹」 */
+  onMoveToFolder?: () => void
   showBacklinks: boolean
   onToggleBacklinks: () => void
   /** 是否刚由用户新建（触发自动聚焦正文 + 滚到顶 + 高亮标题） */
@@ -204,6 +208,14 @@ export default function EditorPane(p: Props) {
           </div>
 
           <div className="editor-meta">
+            <button
+              className={`folder-chip ${p.folderName ? '' : 'empty'}`}
+              onClick={p.onMoveToFolder}
+              title="点击把这篇笔记移动到别的文件夹"
+            >
+              {p.folderName ? `📁 ${p.folderName}` : '📄 未归类'}
+              <span className="chip-act">▾</span>
+            </button>
             <div className="tag-editor">
               {p.note.tags.map((t) => (
                 <span key={t} className="tag-pill">
