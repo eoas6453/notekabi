@@ -37,6 +37,8 @@ const api = {
   readFile: (p, enc) => call('app:readFile', p, enc),
   listEvents: () => call('events:list'),
   saveEvents: (list) => call('events:saveAll', list),
+  listFolders: () => call('folders:list'),
+  saveFolders: (list) => call('folders:saveAll', list),
   notify: (payload) => call('notify:send', payload),
   /** 监听主进程消息（保留扩展点） */
   on: (channel, cb) => {

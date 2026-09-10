@@ -26,8 +26,10 @@ interface Props {
   emptyText: string
   /** 列表呈现形式：行式列表 或 边上的卡片网格 */
   mode?: 'list' | 'cards'
-  /** 右键单条笔记 → 移动到文件夹 */
-  onMoveTo?: (noteId: string) => void
+  /** 右键单条笔记 → 在鼠标位置弹功能框 */
+  onContextMenu?: (e: React.MouseEvent, noteId: string) => void
+  /** 点击右上「收起」：整栏缩略成左侧小球 */
+  onCollapse?: () => void
 }
 
 /** 高亮文本片段 */
@@ -38,6 +40,12 @@ function HL({ text, terms }: { text: string; terms: string[] }) {
       {parts.map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
     </>
   )
+}
+
+/** 拖起笔记时的统一处理：写入 id，供文件夹行接收 */
+export function startNoteDrag(e: React.DragEvent, noteId: string) {
+  e.dataTransfer.setData('application/x-notekabi-note', noteId)
+  e.dataTransfer.effectAllowed = 'move'
 }
 
 export default function NoteList(p: Props) {
@@ -70,10 +78,12 @@ export default function NoteList(p: Props) {
         key={n.id}
         className={`note-item ${active ? 'active' : ''}`}
         onClick={() => p.onOpen(n.id)}
+        draggable
+        onDragStart={(e) => startNoteDrag(e, n.id)}
         onContextMenu={(e) => {
-          if (!p.onMoveTo) return
+          if (!p.onContextMenu) return
           e.preventDefault()
-          p.onMoveTo(n.id)
+          p.onContextMenu(e, n.id)
         }}
       >
         <div className="note-item-top">
@@ -109,10 +119,12 @@ export default function NoteList(p: Props) {
         key={n.id}
         className={`note-card ${active ? 'active' : ''}`}
         onClick={() => p.onOpen(n.id)}
+        draggable
+        onDragStart={(e) => startNoteDrag(e, n.id)}
         onContextMenu={(e) => {
-          if (!p.onMoveTo) return
+          if (!p.onContextMenu) return
           e.preventDefault()
-          p.onMoveTo(n.id)
+          p.onContextMenu(e, n.id)
         }}
       >
         <div className="note-card-top">
@@ -166,6 +178,11 @@ export default function NoteList(p: Props) {
           </select>
           <span className="spacer" />
           <span>{p.items.length} 篇</span>
+          {p.onCollapse && (
+            <button className="icon-btn" title="把笔记栏收起成左侧小球" onClick={p.onCollapse}>
+              «
+            </button>
+          )}
         </div>
       </div>
 

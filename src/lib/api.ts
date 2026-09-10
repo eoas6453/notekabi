@@ -1,4 +1,4 @@
-import type { AppInfo, CalendarEvent, Note, Settings } from '../types'
+import type { AppInfo, CalendarEvent, Folder, Note, Settings } from '../types'
 import { deserializeNote, serializeNote, toMeta } from './note'
 
 /**
@@ -35,6 +35,8 @@ export interface AppAPI {
   readFile(p: string, enc?: string): Promise<string>
   listEvents(): Promise<CalendarEvent[]>
   saveEvents(list: CalendarEvent[]): Promise<CalendarEvent[]>
+  listFolders(): Promise<Folder[]>
+  saveFolders(list: Folder[]): Promise<Folder[]>
   notify(p: { title: string; body: string }): Promise<boolean>
   on?(channel: string, cb: (...a: any[]) => void): void
 }
@@ -58,7 +60,7 @@ const DEFAULT_SETTINGS: Settings = {
   focusMode: false,
   dailyTemplate: 'daily',
   remindOnStart: true,
-  layout: { sidebar: true, list: true, listStyle: 'list' },
+  layout: { sidebar: true, list: true, listStyle: 'list', listCollapsed: false },
 }
 
 function lsGet<T>(key: string, fallback: T): T {
@@ -203,6 +205,13 @@ const browserAPI: AppAPI = {
   },
   async saveEvents(list) {
     lsSet('notekabi.events', list)
+    return list
+  },
+  async listFolders() {
+    return lsGet<Folder[]>('notekabi.folders', [])
+  },
+  async saveFolders(list) {
+    lsSet('notekabi.folders', list)
     return list
   },
   async notify({ title, body }) {

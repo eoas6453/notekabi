@@ -14,6 +14,7 @@ import type { Note, NoteMeta } from '../types'
  * pinned: false
  * favorite: false
  * type: note
+ * folder: 文件夹id
  * ---
  * 正文内容…
  * ---------------------------------------------------------------
@@ -67,6 +68,7 @@ export function stringifyFrontMatter(note: Note): string {
     `pinned: ${!!note.pinned}`,
     `favorite: ${!!note.favorite}`,
     `type: ${note.type || 'note'}`,
+    `folder: ${note.folder || ''}`,
     '---',
     '',
   ].join('\n')
@@ -88,6 +90,7 @@ export function deserializeNote(id: string, raw: string): Note {
     pinned: data.pinned === true || data.pinned === 'true',
     favorite: data.favorite === true || data.favorite === 'true',
     type: data.type === 'daily' ? 'daily' : 'note',
+    folder: data.folder || '',
     content,
   }
 }
@@ -123,6 +126,7 @@ export function toMeta(note: Note): NoteMeta {
     pinned: note.pinned,
     favorite: note.favorite,
     type: note.type,
+    folder: note.folder || '',
     excerpt: makeExcerpt(note.content),
     words: countWords(note.content),
   }

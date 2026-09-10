@@ -1,90 +1,189 @@
+import type { Folder, Note } from '../types'
+
 /**
- * 文件夹收纳：基于现有标签机制。
- * 一个标签 = 一个文件夹，标签名支持「/」嵌套（"工作/项目A"）。
- * 数据层零变化，笔记 .md 里的 tags 数组原样兼容。
+ * 文件夹逻辑（v2：与标签彻底分离）
+ * ---------------------------------------------------------------
+ * - 文件夹是用户自建的独立树：folders.json 里按 order 有序存储
+ * - 一篇笔记只属于一个文件夹（note.folder = 文件夹 id）
+ * - 空值 = 未归类
  */
-export interface FolderNode {
-  name: string
-  full: string // 完整路径，用 / 连接
-  count: number // 直属于该文件夹的笔记数（不含子文件夹）
-  total: number // 含子文件夹的总数
+
+/** 侧栏「全部」的选中值（null 表示不按文件夹过滤） */
+export const ALL_FOLDER = null
+/** 侧栏「未归类」的选中值 */
+export const NO_FOLDER = '__none__'
+
+export interface FolderNode extends Folder {
   children: FolderNode[]
+  /** 直接属于本文件夹的笔记数 */
+  count: number
+  /** 含所有子文件夹的笔记数 */
+  total: number
+  depth: number
+  /** 展示用路径，如 "工作 / 项目A" */
+  path: string
 }
 
-/** 从所有 tag 列表构造文件夹树 */
-export function buildFolderTree(allTags: string[]): FolderNode[] {
-  const root: FolderNode = { name: '', full: '', count: 0, total: 0, children: [] }
-  for (const t of allTags) {
-    if (!t) continue
-    const parts = t.split('/').map((s) => s.trim()).filter(Boolean)
-    if (!parts.length) continue
-    let cur = root
-    let acc = ''
-    for (let i = 0; i < parts.length; i++) {
-      acc = acc ? `${acc}/${parts[i]}` : parts[i]
-      let next = cur.children.find((c) => c.name === parts[i])
-      if (!next) {
-        next = { name: parts[i], full: acc, count: 0, total: 0, children: [] }
-        cur.children.push(next)
-      }
-      // 只有最后一层算 count
-      if (i === parts.length - 1) next.count += 1
-      cur = next
+export function newFolderId(): string {
+  return 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+}
+
+/** 文件夹名合法性：不能为空、不能含路径分隔符与 Windows 非法字符 */
+export function isValidFolderName(name: string): boolean {
+  const s = (name || '').trim()
+  if (!s || s.length > 60) return false
+  return !/[\\/:*?"<>|]/.test(s)
+}
+
+/** 统计每个文件夹的笔记数（只统计直接归属） */
+export function countNotesByFolder(notes: Note[]): Record<string, number> {
+  const map: Record<string, number> = {}
+  for (const n of notes) {
+    const f = n.folder || ''
+    if (!f) continue
+    map[f] = (map[f] || 0) + 1
+  }
+  return map
+}
+
+/**
+ * 由有序的扁平文件夹列表构建树。
+ * order 小的在前；同级内按 order 排，order 相同按名称排。
+ * 父节点不存在或成环的节点，一律降级为根节点（数据脏了也不能崩）。
+ */
+export function buildFolderTree(folders: Folder[], counts: Record<string, number> = {}): FolderNode[] {
+  const list = (folders || []).slice().sort((a, b) => {
+    const oa = typeof a.order === 'number' ? a.order : 0
+    const ob = typeof b.order === 'number' ? b.order : 0
+    return oa - ob || String(a.name).localeCompare(String(b.name), 'zh')
+  })
+
+  const byId = new Map<string, FolderNode>()
+  list.forEach((f) => {
+    byId.set(f.id, {
+      ...f,
+      parentId: f.parentId || null,
+      children: [],
+      count: counts[f.id] || 0,
+      total: 0,
+      depth: 0,
+      path: f.name,
+    })
+  })
+
+  const roots: FolderNode[] = []
+  list.forEach((f) => {
+    const node = byId.get(f.id)!
+    const parent = f.parentId ? byId.get(f.parentId) : null
+    // 自己指向自己 / 指向不存在的父 → 当根处理
+    if (parent && parent.id !== f.id) parent.children.push(node)
+    else roots.push(node)
+  })
+
+  // 计算深度、路径与累计数量（同时断开成环）
+  const seen = new Set<string>()
+  const walk = (nodes: FolderNode[], depth: number, prefix: string) => {
+    for (const n of nodes) {
+      if (seen.has(n.id)) continue
+      seen.add(n.id)
+      n.depth = depth
+      n.path = prefix ? `${prefix} / ${n.name}` : n.name
+      walk(n.children, depth + 1, n.path)
+      n.total = n.count + n.children.reduce((s, c) => s + c.total, 0)
     }
   }
-  // 自底向上累加 total
-  const fillTotal = (n: FolderNode): number => {
-    n.total = n.count + n.children.reduce((s, c) => s + fillTotal(c), 0)
-    return n.total
-  }
-  root.children.forEach((c) => fillTotal(c))
-  // 排序：按名称（中文）
-  const sort = (nodes: FolderNode[]) => {
-    nodes.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
-    nodes.forEach((n) => sort(n.children))
-  }
-  sort(root.children)
-  return root.children
+  walk(roots, 0, '')
+
+  return roots
 }
 
-/** 把所有标签按字典序拍平成列表（用于「移动到…」弹窗） */
-export function flattenFolders(nodes: FolderNode[], depth = 0): { full: string; label: string }[] {
-  const out: { full: string; label: string }[] = []
-  for (const n of nodes) {
-    out.push({ full: n.full, label: '  '.repeat(depth) + (depth ? '└ ' : '') + n.name })
-    out.push(...flattenFolders(n.children, depth + 1))
+/** 深度优先摊平成一行行（用于「移动到」列表、拖拽目标枚举） */
+export function flattenFolders(nodes: FolderNode[]): FolderNode[] {
+  const out: FolderNode[] = []
+  const walk = (list: FolderNode[]) => {
+    for (const n of list) {
+      out.push(n)
+      walk(n.children)
+    }
   }
+  walk(nodes)
   return out
 }
 
-/** 重命名：把 oldFull 改成 newFull（oldFull 必须是叶子 = 直接含笔记的标签） */
-export function renameFolder(allTags: string[], oldFull: string, newFull: string): string[] {
-  return allTags.map((t) => (t === oldFull ? newFull : t))
-}
-
-/** 合并：将 fromFull 合并到 toFull（fromFull 移除，含有 fromFull 的笔记改成 toFull） */
-export function mergeFolder(allTags: string[], fromFull: string, toFull: string): string[] {
-  return allTags.map((t) => (t === fromFull ? toFull : t))
-}
-
-/** 删除文件夹（仅删除该标签，笔记保留；该标签上的笔记会从该文件夹消失） */
-export function deleteFolder(allTags: string[], folder: string): string[] {
-  return allTags.filter((t) => t !== folder)
-}
-
-/** 笔记列表中的「标题里的深度」取最大层数（用于 UI 缩进） */
-export function tagDepth(tag: string): number {
-  return tag.split('/').length
-}
-
-/** 校验文件夹名合法性：不允许 / \ : * ? " < > | 开头/结尾空白 */
-export function isValidFolderName(name: string): boolean {
-  if (!name.trim()) return false
-  if (name.includes('\\')) return false
-  // 每个 / 段都校验
-  for (const seg of name.split('/')) {
-    if (!seg.trim()) return false
-    if (/[\\:*?"<>|]/.test(seg)) return false
+/** 收集某文件夹及其全部后代的 id */
+export function descendantIds(nodes: FolderNode[], id: string): string[] {
+  const hit = flattenFolders(nodes).find((n) => n.id === id)
+  if (!hit) return [id]
+  const out: string[] = []
+  const walk = (n: FolderNode) => {
+    out.push(n.id)
+    n.children.forEach(walk)
   }
-  return true
+  walk(hit)
+  return out
+}
+
+/** id 是否为 ancestorId 的后代（用于阻止把父文件夹拖进自己的子树） */
+export function isDescendant(folders: Folder[], id: string, ancestorId: string): boolean {
+  if (id === ancestorId) return true
+  let cur: Folder | undefined = folders.find((f) => f.id === id)
+  let guard = 0
+  while (cur && cur.parentId && guard++ < 200) {
+    if (cur.parentId === ancestorId) return true
+    const parentId: string = cur.parentId
+    cur = folders.find((f) => f.id === parentId)
+  }
+  return false
+}
+
+/**
+ * 重排：把 dragId 放到 targetId 的 前 / 后 / 内部，返回新的有序列表
+ * pos: 'before' | 'after' | 'inside'
+ */
+export function reorderFolders(
+  folders: Folder[],
+  dragId: string,
+  targetId: string | null,
+  pos: 'before' | 'after' | 'inside',
+): Folder[] {
+  if (dragId === targetId) return folders
+  const drag = folders.find((f) => f.id === dragId)
+  if (!drag) return folders
+
+  // 不允许拖进自己的后代
+  if (targetId && (pos === 'inside' ? isDescendant(folders, targetId, dragId) : false)) return folders
+
+  const target = targetId ? folders.find((f) => f.id === targetId) : null
+  const nextParent = pos === 'inside' ? targetId : target ? (target.parentId ?? null) : null
+
+  const rest = folders.filter((f) => f.id !== dragId)
+  const moved: Folder = { ...drag, parentId: nextParent ?? null }
+
+  if (pos === 'inside' || !targetId) {
+    // 作为 target 的最后一个子节点（或根末尾）
+    return [...rest, moved]
+  }
+
+  const idx = rest.findIndex((f) => f.id === targetId)
+  if (idx === -1) return [...rest, moved]
+  const insertAt = pos === 'before' ? idx : idx + 1
+  const out = rest.slice()
+  out.splice(insertAt, 0, moved)
+  return out
+}
+
+/** 重排后统一重算 order，保证落盘数据里 order 与数组顺序一致 */
+export function normalizeOrder(folders: Folder[]): Folder[] {
+  return folders.map((f, i) => ({ ...f, order: i }))
+}
+
+/** 同级内是否已有同名文件夹 */
+export function hasSameName(folders: Folder[], parentId: string | null, name: string, exceptId?: string): boolean {
+  const key = (name || '').trim().toLowerCase()
+  return folders.some(
+    (f) =>
+      f.id !== exceptId &&
+      (f.parentId || null) === (parentId || null) &&
+      String(f.name).trim().toLowerCase() === key,
+  )
 }

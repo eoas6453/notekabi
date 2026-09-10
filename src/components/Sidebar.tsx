@@ -1,4 +1,4 @@
-import type { Note, ViewKey } from '../types'
+import type { ViewKey } from '../types'
 import type { ReactNode } from 'react'
 
 interface Props {
@@ -17,8 +17,11 @@ interface Props {
   onOpenStorage: () => void
   isElectron: boolean
   pendingCount?: number
-  /** 收纳（文件夹）树节点，由父组件注入 */
+  /** 文件夹树，由父组件注入（放在标签上方） */
   folderTree?: ReactNode
+  /** 各分组是否折叠 */
+  collapsed: Record<string, boolean>
+  onToggleSection: (key: string) => void
 }
 
 const NAV: { key: ViewKey; icon: string; label: string }[] = [
@@ -32,6 +35,46 @@ const NAV: { key: ViewKey; icon: string; label: string }[] = [
   { key: 'trash', icon: '🗑️', label: '回收站' },
 ]
 
+/** 可折叠分组：点标题栏收起 / 展开 */
+function Section({
+  id,
+  label,
+  collapsed,
+  onToggle,
+  children,
+  grow,
+  extra,
+}: {
+  id: string
+  label: string
+  collapsed: Record<string, boolean>
+  onToggle: (k: string) => void
+  children: ReactNode
+  /** 占满剩余高度（文件夹 / 标签这类可能很长的分组） */
+  grow?: boolean
+  extra?: ReactNode
+}) {
+  const off = !!collapsed[id]
+  return (
+    <div
+      className={`nav-group ${off ? 'collapsed' : ''}`}
+      style={
+        grow
+          ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
+          : undefined
+      }
+    >
+      <button className="sec-head" onClick={() => onToggle(id)} title={off ? '展开' : '收起'}>
+        <span className={`sec-arrow ${off ? 'off' : ''}`}>▾</span>
+        <span className="sec-label">{label}</span>
+        <span className="spacer" />
+        {extra}
+      </button>
+      {!off && children}
+    </div>
+  )
+}
+
 export default function Sidebar(p: Props) {
   return (
     <aside className="sidebar">
@@ -44,7 +87,7 @@ export default function Sidebar(p: Props) {
         <span>＋</span> 新建笔记
       </button>
 
-      <div className="nav-group">
+      <Section id="nav" label="导航" collapsed={p.collapsed} onToggle={p.onToggleSection}>
         {NAV.map((n) => (
           <button
             key={n.key}
@@ -62,10 +105,9 @@ export default function Sidebar(p: Props) {
             )}
           </button>
         ))}
-      </div>
+      </Section>
 
-      <div className="nav-group">
-        <div className="nav-label">快捷操作</div>
+      <Section id="quick" label="快捷操作" collapsed={p.collapsed} onToggle={p.onToggleSection}>
         <button className="nav-item" onClick={p.onDaily} title="打开今日笔记 (Ctrl+D)">
           <span className="ico">☀️</span>
           <span>今日笔记</span>
@@ -78,12 +120,21 @@ export default function Sidebar(p: Props) {
           <span className="ico">📋</span>
           <span>从模板新建</span>
         </button>
-      </div>
+      </Section>
 
-      <div className="nav-group" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div className="nav-label">标签{p.activeTags.length > 1 ? '（可多选组合）' : ''}</div>
+      <Section id="folders" label="文件夹" collapsed={p.collapsed} onToggle={p.onToggleSection} grow>
+        <div className="sidebar-folders">{p.folderTree}</div>
+      </Section>
+
+      <Section
+        id="tags"
+        label={`标签${p.activeTags.length > 1 ? '（可多选组合）' : ''}`}
+        collapsed={p.collapsed}
+        onToggle={p.onToggleSection}
+        grow
+      >
         <div className="sidebar-tags">
-          {p.tags.length === 0 && <div className="nav-label">暂无标签</div>}
+          {p.tags.length === 0 && <div className="nav-hint">暂无标签</div>}
           {p.tags.map((t) => (
             <button
               key={t.name}
@@ -96,13 +147,7 @@ export default function Sidebar(p: Props) {
             </button>
           ))}
         </div>
-        {p.folderTree && (
-          <>
-            <div className="nav-label" style={{ marginTop: 12 }}>收纳（文件夹）</div>
-            <div className="sidebar-folders">{p.folderTree}</div>
-          </>
-        )}
-      </div>
+      </Section>
 
       <div className="sidebar-foot">
         <button className="nav-item" onClick={p.onSettings} title="设置 (Ctrl+,)">
@@ -121,5 +166,3 @@ export default function Sidebar(p: Props) {
     </aside>
   )
 }
-
-export type { Note }

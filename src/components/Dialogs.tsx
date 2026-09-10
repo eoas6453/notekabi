@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Note, Settings } from '../types'
 import { api } from '../lib/api'
 import { TEMPLATES } from '../lib/templates'
@@ -473,18 +473,32 @@ export function MoveToDialog({
   onNew,
 }: {
   note: Note | null
-  folders: { full: string; label: string }[]
-  onMove: (folder: string) => void
+  /** 摊平后的文件夹树（带缩进路径） */
+  folders: { id: string; label: string; depth: number }[]
+  /** folderId 为空字符串表示移到「未归类」 */
+  onMove: (folderId: string) => void
   onClose: () => void
   onNew: () => void
 }) {
-  if (!note) return <Dialog title="移动到文件夹" onClose={onClose}><div className="empty-hint">没有选中的笔记</div></Dialog>
+  if (!note)
+    return (
+      <Dialog title="移动到文件夹" onClose={onClose}>
+        <div className="empty-hint">没有选中的笔记</div>
+      </Dialog>
+    )
   return (
     <Dialog title={`移动到文件夹 · 「${note.title || '无标题笔记'}」`} onClose={onClose}>
       <div className="field-hint" style={{ marginBottom: 10 }}>
-        点选目标文件夹，笔记会加上对应标签（已是该文件夹标签则不重复加）。
+        一篇笔记只属于一个文件夹。选「未归类」可把笔记移出所有文件夹。
       </div>
       <div className="move-list">
+        <div
+          className={`move-row ${!note.folder ? 'active' : ''}`}
+          onClick={() => onMove('')}
+          style={{ paddingLeft: 10 }}
+        >
+          <span className="move-name">📄 未归类{!note.folder && <span className="move-tag">当前</span>}</span>
+        </div>
         {folders.length === 0 && (
           <div className="empty-hint">
             还没有文件夹
@@ -496,16 +510,158 @@ export function MoveToDialog({
         )}
         {folders.map((f) => (
           <div
-            key={f.full}
-            className={`move-row ${note.tags.includes(f.full) ? 'active' : ''}`}
-            onClick={() => onMove(f.full)}
+            key={f.id}
+            className={`move-row ${note.folder === f.id ? 'active' : ''}`}
+            style={{ paddingLeft: 10 + f.depth * 14 }}
+            onClick={() => onMove(f.id)}
           >
             <span className="move-name">
+              {f.depth ? '└ ' : ''}
               {f.label}
-              {note.tags.includes(f.full) && <span className="move-tag">已在</span>}
+              {note.folder === f.id && <span className="move-tag">当前</span>}
             </span>
           </div>
         ))}
+      </div>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------- 单行输入弹窗
+export function PromptDialog({
+  title,
+  label,
+  defaultValue = '',
+  placeholder = '',
+  confirmText = '确定',
+  onOk,
+  onClose,
+}: {
+  title: string
+  label: string
+  defaultValue?: string
+  placeholder?: string
+  confirmText?: string
+  onOk: (value: string) => void
+  onClose: () => void
+}) {
+  const [v, setV] = useState(defaultValue)
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      ref.current?.focus()
+      ref.current?.select()
+    })
+  }, [])
+  const submit = () => {
+    const val = v.trim()
+    if (!val) {
+      onClose()
+      return
+    }
+    onOk(val)
+  }
+  return (
+    <Dialog
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="spacer" />
+          <button className="btn" onClick={onClose}>
+            取消
+          </button>
+          <button className="btn primary" onClick={submit}>
+            {confirmText}
+          </button>
+        </>
+      }
+    >
+      <div className="field">
+        <span className="field-label">{label}</span>
+        <input
+          ref={ref}
+          value={v}
+          placeholder={placeholder}
+          onChange={(e) => setV(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+      </div>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------- 编辑标签
+export function TagDialog({
+  note,
+  allTags,
+  onToggle,
+  onAdd,
+  onClose,
+}: {
+  note: Note
+  allTags: string[]
+  onToggle: (tag: string) => void
+  onAdd: (tag: string) => void
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState('')
+  return (
+    <Dialog title={`更改标签 · 「${note.title || '无标题笔记'}」`} onClose={onClose}>
+      <div className="field">
+        <span className="field-label">当前标签</span>
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          {note.tags.length === 0 && <span className="field-hint">（还没有标签）</span>}
+          {note.tags.map((t) => (
+            <button key={t} className="tag-chip active" onClick={() => onToggle(t)} title="点击移除">
+              #{t} ✕
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span className="field-label">全部标签（点击添加）</span>
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          {allTags.filter((t) => !note.tags.includes(t)).length === 0 && (
+            <span className="field-hint">（已全部添加）</span>
+          )}
+          {allTags
+            .filter((t) => !note.tags.includes(t))
+            .map((t) => (
+              <button key={t} className="tag-chip" onClick={() => onToggle(t)}>
+                #{t} ＋
+              </button>
+            ))}
+        </div>
+      </div>
+      <div className="field">
+        <span className="field-label">新建标签</span>
+        <div className="row">
+          <input
+            value={draft}
+            placeholder="输入新标签后回车"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && draft.trim()) {
+                onAdd(draft.trim())
+                setDraft('')
+              }
+            }}
+          />
+          <button
+            className="btn"
+            onClick={() => {
+              if (draft.trim()) {
+                onAdd(draft.trim())
+                setDraft('')
+              }
+            }}
+          >
+            添加
+          </button>
+        </div>
       </div>
     </Dialog>
   )

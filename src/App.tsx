@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AppInfo, Backlink, CalendarEvent, Note, Settings, ViewKey } from './types'
+import type { AppInfo, Backlink, CalendarEvent, Folder, Note, Settings, ViewKey } from './types'
 import { api, DEFAULT_SETTINGS } from './lib/api'
 import { deriveTitle, extractLinks, newId } from './lib/note'
 import { searchNotes } from './lib/search'
@@ -8,28 +8,35 @@ import { dailyTitle, toDateKey } from './lib/date'
 import { formatTimeAgo } from './lib/timeago'
 import {
   buildFolderTree,
-  deleteFolder as deleteFolderTag,
+  countNotesByFolder,
+  descendantIds,
   flattenFolders,
+  hasSameName,
   isValidFolderName,
-  mergeFolder as mergeFolderTag,
-  renameFolder as renameFolderTag,
+  newFolderId,
+  NO_FOLDER,
+  normalizeOrder,
+  reorderFolders,
 } from './lib/folder'
 import { pendingReminders } from './lib/calendar'
 import { buildPrintHtml, noteToMarkdown, notesToDocx, notesToMarkdownZip } from './lib/export'
 import Sidebar from './components/Sidebar'
-import FolderTree from './components/FolderTree'
+import FolderTree, { type DropPos } from './components/FolderTree'
 import NoteList, { type ListItem } from './components/NoteList'
 import EditorPane, { type EditorMode } from './components/EditorPane'
 import PrintView from './components/PrintView'
+import ContextMenu from './components/ContextMenu'
 import { GraphView, KanbanView } from './components/Views'
 import { CalendarView } from './components/CalendarView'
 import {
   Dialog,
   MoveToDialog,
+  PromptDialog,
   RandomDialog,
   SettingsDialog,
   ShortcutsDialog,
   StatsDialog,
+  TagDialog,
   TemplateDialog,
   TrashDialog,
 } from './components/Dialogs'
@@ -78,9 +85,29 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [dialog, setDialog] = useState<
-    null | 'settings' | 'stats' | 'template' | 'shortcuts' | 'trash' | 'random' | 'export' | 'move'
+    | null
+    | 'settings'
+    | 'stats'
+    | 'template'
+    | 'shortcuts'
+    | 'trash'
+    | 'random'
+    | 'export'
+    | 'move'
+    | 'newFolder'
+    | 'renameFolder'
+    | 'addTag'
+    | 'editTag'
   >(null)
   const [moveTarget, setMoveTarget] = useState<Note | null>(null)
+  /** 右键菜单：笔记（在鼠标位置弹出功能框） */
+  const [noteMenu, setNoteMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  /** 文件夹树（与标签完全独立）：有序、可嵌套、可折叠 */
+  const [folders, setFolders] = useState<Folder[]>([])
+  /** 新建 / 重命名文件夹时的上下文 */
+  const [folderCtx, setFolderCtx] = useState<{ parentId: string | null; id?: string; name?: string } | null>(null)
+  /** 侧栏各分组的折叠状态（存 localStorage，属纯 UI 偏好） */
+  const [sections, setSections] = useState<Record<string, boolean>>({ tags: true })
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([])
   const [printJob, setPrintJob] = useState<{ html: string; name: string } | null>(null)
   const [showBacklinks, setShowBacklinks] = useState(true)
@@ -90,13 +117,14 @@ export default function App() {
   const [assetMap, setAssetMap] = useState<Record<string, string>>({})
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const [freshlyCreated, setFreshlyCreated] = useState(false)
-  /** 当前选中的文件夹（精确路径，如"工作/项目A"），null = 不按文件夹筛选 */
+  /** 当前选中的文件夹 id；null = 全部，NO_FOLDER = 未归类 */
   const [activeFolder, setActiveFolder] = useState<string | null>(null)
   /** 是否在按文件夹筛选时包含子文件夹的笔记 */
   const [includeSubfolders, setIncludeSubfolders] = useState(true)
 
   const searchRef = useRef<HTMLInputElement>(null)
-  const pendingRef = useRef<Note | null>(null)
+  /** 待保存队列：按 id 归档，批量改动（如整组移动文件夹）不会互相覆盖 */
+  const pendingRef = useRef<Record<string, Note> | null>(null)
   const timerRef = useRef<number | null>(null)
 
   // ---------------------------------------------------------------- 提示条
@@ -120,6 +148,7 @@ export default function App() {
 
         const metas = await api.listNotes()
         const evs = await api.listEvents().catch(() => [])
+        const fds = await api.listFolders().catch(() => [])
         // 分批并发读取正文，保证大量笔记时也能快速启动
         const full: Note[] = []
         const size = 40
@@ -150,6 +179,7 @@ export default function App() {
         }
         setNotes(full)
         setEvents(evs)
+        setFolders(fds)
 
         // 启动提醒：今日/逾期的提醒弹提示 + 系统通知
         if (s.remindOnStart) {
@@ -175,6 +205,28 @@ export default function App() {
       alive = false
     }
   }, [toast])
+
+  // ---------------------------------------------------------------- 侧栏分组折叠状态
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('notekabi.sidebar.sections')
+      if (raw) setSections((s) => ({ ...s, ...JSON.parse(raw) }))
+    } catch {
+      /* 忽略 */
+    }
+  }, [])
+
+  const toggleSection = useCallback((key: string) => {
+    setSections((s) => {
+      const next = { ...s, [key]: !s[key] }
+      try {
+        localStorage.setItem('notekabi.sidebar.sections', JSON.stringify(next))
+      } catch {
+        /* 忽略 */
+      }
+      return next
+    })
+  }, [])
 
   // ---------------------------------------------------------------- 主题与字号
   useEffect(() => {
@@ -219,11 +271,11 @@ export default function App() {
 
   // ---------------------------------------------------------------- 自动保存
   const flushSave = useCallback(async () => {
-    const note = pendingRef.current
-    if (!note) return
+    const batch = pendingRef.current
+    if (!batch) return
     pendingRef.current = null
     try {
-      await api.writeNote(note)
+      for (const note of Object.values(batch)) await api.writeNote(note)
       setSavedAt(new Date().toISOString())
     } catch (e) {
       toast('保存失败：' + (e as Error).message)
@@ -233,7 +285,7 @@ export default function App() {
   }, [toast])
 
   const scheduleSave = useCallback((note: Note) => {
-    pendingRef.current = note
+    pendingRef.current = { ...(pendingRef.current || {}), [note.id]: note }
     setSaving(true)
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = window.setTimeout(() => {
@@ -290,6 +342,8 @@ export default function App() {
         pinned: false,
         favorite: false,
         type: init?.type ?? 'note',
+        // 新建时默认放进当前选中的文件夹
+        folder: init?.folder ?? (activeFolder && activeFolder !== NO_FOLDER ? activeFolder : ''),
       }
       setNotes((ns) => [note, ...ns])
       setCurrentId(note.id)
@@ -300,7 +354,7 @@ export default function App() {
       scheduleSave(note)
       return note
     },
-    [scheduleSave],
+    [scheduleSave, activeFolder],
   )
 
   const openNote = useCallback(
@@ -416,110 +470,142 @@ export default function App() {
     return [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count }))
   }, [notes])
 
-  /** 所有用过的标签（含斜杠嵌套的文件夹路径），去重 */
-  const allFolderTags = useMemo(
-    () => Array.from(new Set(notes.flatMap((n) => n.tags))).sort((a, b) => a.localeCompare(b, 'zh')),
-    [notes],
-  )
-  const folderTree = useMemo(() => buildFolderTree(allFolderTags), [allFolderTags])
-
-  /** 把指定旧标签全量重命名为新名（含所有笔记的 tags 数组） */
-  const renameFolder = useCallback(
-    (oldFull: string) => {
-      const next = window.prompt(`把文件夹「${oldFull}」重命名为：`, oldFull.split('/').pop())
-      if (!next || !isValidFolderName(next) || next === oldFull) {
-        if (next && !isValidFolderName(next)) toast('文件夹名非法（不可含 \\:*?"<>|，每段不能为空）')
-        return
-      }
-      const newFull = oldFull.includes('/') ? oldFull.replace(/[^/]+$/, next) : next
-      if (newFull === oldFull) return
-      setNotes((ns) =>
-        ns.map((n) => ({ ...n, tags: renameFolderTag(n.tags, oldFull, newFull) })),
-      )
-      // 落盘（每篇笔记都要写）
-      notes.forEach((n) => {
-        if (n.tags.includes(oldFull)) scheduleSave({ ...n, tags: renameFolderTag(n.tags, oldFull, newFull) })
-      })
-      if (activeFolder === oldFull) setActiveFolder(newFull)
-      toast(`已重命名为「${newFull}」`)
-    },
-    [notes, activeFolder, toast],
-  )
-
-  const deleteFolder = useCallback(
-    (folder: string) => {
-      if (!confirm(`删除文件夹「${folder}」？\n笔记不会被删除，但该文件夹内的笔记会失去这个标签。`)) return
-      setNotes((ns) =>
-        ns.map((n) => ({ ...n, tags: deleteFolderTag(n.tags, folder) })),
-      )
-      notes.forEach((n) => {
-        if (n.tags.includes(folder)) scheduleSave({ ...n, tags: deleteFolderTag(n.tags, folder) })
-      })
-      if (activeFolder === folder) setActiveFolder(null)
-      toast(`已删除文件夹「${folder}」`)
-    },
-    [notes, activeFolder, toast],
-  )
-
-  const mergeFolder = useCallback(
-    (fromFull: string) => {
-      const toFull = window.prompt(`把「${fromFull}」合并到哪个文件夹？\n（输入完整路径，例如「${fromFull.split('/').slice(0, -1).concat(['其他']).join('/')}」）`)
-      if (!toFull || !isValidFolderName(toFull) || toFull === fromFull) {
-        if (toFull && !isValidFolderName(toFull)) toast('文件夹名非法（不可含 \\:*?"<>|，每段不能为空）')
-        return
-      }
-      setNotes((ns) => ns.map((n) => ({ ...n, tags: mergeFolderTag(n.tags, fromFull, toFull) })))
-      notes.forEach((n) => {
-        if (n.tags.includes(fromFull)) scheduleSave({ ...n, tags: mergeFolderTag(n.tags, fromFull, toFull) })
-      })
-      toast(`已合并「${fromFull}」到「${toFull}」`)
-    },
-    [notes, toast],
-  )
-
-  /** 新建文件夹：只是新建一个标签，等用户去标签里给笔记挂上。
-   *  「parent」为空 = 根目录新建；否则创建 parent 的子目录 */
-  const createFolder = useCallback(
-    (parent: string | null) => {
-      const name = window.prompt(parent ? `在「${parent}」下新建子文件夹：` : '新建文件夹：')
-      if (!name) return
-      const full = parent ? `${parent}/${name.trim()}` : name.trim()
-      if (!isValidFolderName(full)) {
-        toast('文件夹名非法（不可含 \\:*?"<>|，每段不能为空）')
-        return
-      }
-      // 已存在则激活
-      if (allFolderTags.includes(full)) {
-        setActiveFolder(full)
-        toast(`「${full}」已存在，已为你选中`)
-        return
-      }
-      setActiveFolder(full)
-      toast(`已新建文件夹「${full}」，把笔记的标签设成「${full}」即可收纳进来`)
-    },
-    [allFolderTags, toast],
-  )
-
+  // ---------------------------------------------------------------- 文件夹（独立于标签）
+  /** 每个文件夹的笔记数（只算直接归属） */
+  const folderCounts = useMemo(() => countNotesByFolder(notes), [notes])
+  const folderTree = useMemo(() => buildFolderTree(folders, folderCounts), [folders, folderCounts])
   const flatFolders = useMemo(() => flattenFolders(folderTree), [folderTree])
+  const unclassifiedCount = useMemo(() => notes.filter((n) => !n.folder).length, [notes])
+  /** 当前选中文件夹（含子文件夹）的 id 集合，用于过滤列表 */
+  const activeFolderIds = useMemo(() => {
+    if (!activeFolder || activeFolder === NO_FOLDER) return null
+    if (!includeSubfolders) return new Set([activeFolder])
+    return new Set(descendantIds(folderTree, activeFolder))
+  }, [activeFolder, includeSubfolders, folderTree])
 
-  /** 把指定笔记「移入」某个文件夹：往 tags 加 folder（已在就不重加） */
+  /** 文件夹改动落盘（folders.json） */
+  const persistFolders = useCallback(
+    (list: Folder[]) => {
+      const ordered = normalizeOrder(list)
+      setFolders(ordered)
+      api.saveFolders(ordered).catch(() => toast('文件夹保存失败'))
+    },
+    [toast],
+  )
+
+  /** 新建文件夹：先弹输入框，parentId 为空则建在根级 */
+  const createFolder = useCallback((parentId: string | null) => {
+    setFolderCtx({ parentId })
+    setDialog('newFolder')
+  }, [])
+
+  const doCreateFolder = useCallback(
+    (raw: string) => {
+      const parentId = folderCtx?.parentId ?? null
+      const name = (raw || '').trim()
+      if (!isValidFolderName(name)) {
+        toast('文件夹名不能为空，也不能包含 / \\ : * ? " < > |')
+        return
+      }
+      if (hasSameName(folders, parentId, name)) {
+        toast('同级下已经有同名文件夹了')
+        return
+      }
+      const f: Folder = { id: newFolderId(), name, parentId, order: folders.length, collapsed: false }
+      persistFolders([...folders, f])
+      setActiveFolder(f.id)
+      toast(`已新建文件夹「${name}」`)
+    },
+    [folderCtx, folders, persistFolders, toast],
+  )
+
+  /** 重命名（树里内联输入后回车） */
+  const applyRenameFolder = useCallback(
+    (id: string, raw: string) => {
+      const f = folders.find((x) => x.id === id)
+      if (!f) return
+      const name = (raw || '').trim()
+      if (!name || name === f.name) return
+      if (!isValidFolderName(name)) {
+        toast('文件夹名不能为空，也不能包含 / \\ : * ? " < > |')
+        return
+      }
+      if (hasSameName(folders, f.parentId, name, id)) {
+        toast('同级下已经有同名文件夹了')
+        return
+      }
+      persistFolders(folders.map((x) => (x.id === id ? { ...x, name } : x)))
+      toast(`已重命名为「${name}」`)
+    },
+    [folders, persistFolders, toast],
+  )
+
+  /** 删除文件夹：笔记变「未归类」，子文件夹上提一级 */
+  const deleteFolder = useCallback(
+    (id: string) => {
+      const target = folders.find((f) => f.id === id)
+      if (!target) return
+      const kids = folders.filter((f) => f.parentId === id).length
+      if (
+        !confirm(
+          `删除文件夹「${target.name}」？\n\n· 里面的笔记不会被删除，会变成「未归类」` +
+            (kids ? `\n· ${kids} 个子文件夹会上提一级` : ''),
+        )
+      )
+        return
+      const next = folders
+        .filter((f) => f.id !== id)
+        .map((f) => (f.parentId === id ? { ...f, parentId: target.parentId } : f))
+      persistFolders(next)
+      notes.filter((n) => n.folder === id).forEach((n) => updateNote(n.id, { folder: '' }))
+      if (activeFolder === id) setActiveFolder(null)
+      toast(`已删除文件夹「${target.name}」`)
+    },
+    [folders, notes, activeFolder, persistFolders, updateNote, toast],
+  )
+
+  const toggleFolderCollapse = useCallback(
+    (id: string) => {
+      persistFolders(folders.map((f) => (f.id === id ? { ...f, collapsed: !f.collapsed } : f)))
+    },
+    [folders, persistFolders],
+  )
+
+  /** 拖动文件夹排序 / 改变层级 */
+  const moveFolder = useCallback(
+    (dragId: string, targetId: string | null, pos: DropPos) => {
+      const next = reorderFolders(folders, dragId, targetId, pos)
+      if (next === folders) return
+      persistFolders(next)
+    },
+    [folders, persistFolders],
+  )
+
+  /** 把笔记移动到某个文件夹（folderId 为空 = 未归类） */
   const moveNoteToFolder = useCallback(
-    (noteId: string, folder: string) => {
+    (noteId: string, folderId: string) => {
       const target = notes.find((n) => n.id === noteId)
       if (!target) return
-      if (target.tags.includes(folder)) {
-        toast(`已在「${folder}」中`)
+      if ((target.folder || '') === folderId) {
         setDialog(null)
         setMoveTarget(null)
         return
       }
-      const next = [...target.tags, folder]
-      updateNote(noteId, { tags: next })
-      toast(`已移入「${folder}」`)
+      updateNote(noteId, { folder: folderId })
+      const name = folderId ? folders.find((f) => f.id === folderId)?.name || '文件夹' : '未归类'
+      toast(`已移动到「${name}」`)
       setDialog(null)
       setMoveTarget(null)
     },
-    [notes, updateNote, toast],
+    [notes, folders, updateNote, toast],
+  )
+
+  /** 从笔记栏把笔记拖到文件夹上 */
+  const dropNoteToFolder = useCallback(
+    (noteId: string, folderId: string | null) => {
+      moveNoteToFolder(noteId, folderId || '')
+    },
+    [moveNoteToFolder],
   )
 
   const knownTitles = useMemo(() => new Set(notes.map((n) => n.title.trim().toLowerCase())), [notes])
@@ -532,12 +618,10 @@ export default function App() {
     if (view === 'favorite') pool = pool.filter((n) => n.favorite)
     if (view === 'daily') pool = pool.filter((n) => n.type === 'daily')
     if (activeTags.length) pool = pool.filter((n) => activeTags.every((t) => n.tags.includes(t)))
-    if (activeFolder) {
-      pool = pool.filter((n) =>
-        n.tags.some((t) =>
-          t === activeFolder || (includeSubfolders && t.startsWith(activeFolder + '/')),
-        ),
-      )
+    if (activeFolder === NO_FOLDER) {
+      pool = pool.filter((n) => !n.folder)
+    } else if (activeFolderIds) {
+      pool = pool.filter((n) => activeFolderIds.has(n.folder || ''))
     }
 
     if (query.trim()) {
@@ -551,7 +635,7 @@ export default function App() {
       return +new Date(b.updated) - +new Date(a.updated)
     })
     return sorted.map((n) => ({ note: n, terms: [] }))
-  }, [notes, view, activeTags, activeFolder, includeSubfolders, query, settings.sortBy])
+  }, [notes, view, activeTags, activeFolder, activeFolderIds, query, settings.sortBy])
 
   const highlightTerms = useMemo(() => {
     if (!query.trim()) return []
@@ -767,7 +851,9 @@ export default function App() {
 
   // 布局可见性：专注模式（纯笔记）下隐藏所有左栏；否则按 layout 偏好
   const showSidebar = !settings.focusMode && settings.layout.sidebar
-  const showList = !settings.focusMode && settings.layout.list
+  const showList = !settings.focusMode && settings.layout.list && !settings.layout.listCollapsed
+  /** 笔记栏缩略成小球（贴左边栏，像电脑管家的悬浮球） */
+  const showOrb = !settings.focusMode && settings.layout.list && !!settings.layout.listCollapsed
 
   return (
     <div className={`app ${settings.focusMode ? 'focus-mode' : ''}`}>
@@ -799,17 +885,23 @@ export default function App() {
           onOpenStorage={() => isElectron && api.openStorage()}
           isElectron={isElectron}
           pendingCount={pendingEvents.length}
+          collapsed={sections}
+          onToggleSection={toggleSection}
           folderTree={
             <FolderTree
               nodes={folderTree}
               activeFolder={activeFolder}
               onSelect={setActiveFolder}
-              onRename={renameFolder}
+              onCreate={createFolder}
+              onRename={applyRenameFolder}
               onDelete={deleteFolder}
-              onMerge={mergeFolder}
-              onNewSub={createFolder}
+              onToggleCollapse={toggleFolderCollapse}
+              onMoveFolder={moveFolder}
+              onDropNote={dropNoteToFolder}
               includeSubfolders={includeSubfolders}
               onToggleIncludeSubfolders={() => setIncludeSubfolders((v) => !v)}
+              totalCount={notes.length}
+              unclassifiedCount={unclassifiedCount}
             />
           }
         />
@@ -835,20 +927,42 @@ export default function App() {
               ? '没有匹配的笔记，试试其它关键词'
               : activeTags.length
                 ? '当前标签下没有笔记'
-                : '还没有笔记，按 Ctrl + N 开始记录'
+                : activeFolder === NO_FOLDER
+                  ? '没有未归类的笔记'
+                  : activeFolder
+                    ? '这个文件夹里还没有笔记，可以把笔记拖进来'
+                    : '还没有笔记，按 Ctrl + N 开始记录'
           }
-          onMoveTo={(id) => {
-            const target = notes.find((n) => n.id === id)
-            if (target) {
-              setMoveTarget(target)
-              setDialog('move')
-            }
-          }}
+          onContextMenu={(e, id) => setNoteMenu({ x: e.clientX, y: e.clientY, id })}
+          onCollapse={() => setLayout({ listCollapsed: true })}
         />
       )}
 
+      {showOrb && (
+        <button
+          className="list-orb"
+          style={{ left: showSidebar ? 232 : 8 }}
+          title="展开笔记栏（也可按 Ctrl+Shift+L 切换）"
+          onClick={() => setLayout({ listCollapsed: false })}
+        >
+          <span className="orb-ico">📋</span>
+          <span className="orb-n">{listItems.length}</span>
+        </button>
+      )}
+
       {view === 'graph' ? (
-        <GraphView notes={notes} currentId={currentId} onOpen={openNote} />
+        <GraphView
+          notes={notes}
+          currentId={currentId}
+          onOpenNote={(id) => {
+            void openNote(id)
+            setView('all')
+          }}
+          onFilterTag={(t) => {
+            setActiveTags([t])
+            setView('all')
+          }}
+        />
       ) : view === 'kanban' ? (
         <KanbanView notes={notes} onOpen={openNote} onToggle={toggleTask} />
       ) : view === 'calendar' ? (
@@ -1060,8 +1174,8 @@ export default function App() {
       {dialog === 'move' && (
         <MoveToDialog
           note={moveTarget}
-          folders={flatFolders}
-          onMove={(folder) => moveTarget && moveNoteToFolder(moveTarget.id, folder)}
+          folders={flatFolders.map((f) => ({ id: f.id, label: f.name, depth: f.depth }))}
+          onMove={(folderId) => moveTarget && moveNoteToFolder(moveTarget.id, folderId)}
           onClose={() => {
             setDialog(null)
             setMoveTarget(null)
@@ -1073,6 +1187,151 @@ export default function App() {
           }}
         />
       )}
+
+      {dialog === 'newFolder' && (
+        <PromptDialog
+          title={folderCtx?.parentId ? '新建子文件夹' : '新建文件夹'}
+          label="文件夹名称"
+          placeholder="例如：工作 / 项目A / 读书笔记"
+          confirmText="创建"
+          onOk={(v) => {
+            setDialog(null)
+            doCreateFolder(v)
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+
+      {dialog === 'editTag' && moveTarget && (
+        <TagDialog
+          note={moveTarget}
+          allTags={tagStats.map((t) => t.name)}
+          onToggle={(tag) => {
+            const has = moveTarget.tags.includes(tag)
+            updateNote(moveTarget.id, {
+              tags: has ? moveTarget.tags.filter((x) => x !== tag) : [...moveTarget.tags, tag],
+            })
+          }}
+          onAdd={(tag) => {
+            if (!moveTarget.tags.includes(tag)) updateNote(moveTarget.id, { tags: [...moveTarget.tags, tag] })
+          }}
+          onClose={() => {
+            setDialog(null)
+            setMoveTarget(null)
+          }}
+        />
+      )}
+
+      {dialog === 'addTag' && moveTarget && (
+        <PromptDialog
+          title="添加标签"
+          label={`给「${moveTarget.title || '无标题笔记'}」添加标签`}
+          placeholder="多个标签用逗号分隔"
+          confirmText="添加"
+          onOk={(v) => {
+            const add = v
+              .split(/[,，\s]+/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+            const merged = Array.from(new Set([...moveTarget.tags, ...add]))
+            updateNote(moveTarget.id, { tags: merged })
+            setDialog(null)
+            setMoveTarget(null)
+            toast(add.length > 1 ? `已添加 ${add.length} 个标签` : `已添加标签「${add[0]}」`)
+          }}
+          onClose={() => {
+            setDialog(null)
+            setMoveTarget(null)
+          }}
+        />
+      )}
+
+      {/* 笔记右键功能框：在鼠标位置弹出 */}
+      {noteMenu &&
+        (() => {
+          const n = notes.find((x) => x.id === noteMenu.id)
+          if (!n) return null
+          return (
+            <ContextMenu
+              x={noteMenu.x}
+              y={noteMenu.y}
+              title={n.title || '无标题笔记'}
+              onClose={() => setNoteMenu(null)}
+              items={[
+                { icon: '📖', label: '打开', onSelect: () => void openNote(n.id) },
+                {
+                  icon: n.favorite ? '★' : '☆',
+                  label: n.favorite ? '取消加星' : '加星',
+                  onSelect: () => updateNote(n.id, { favorite: !n.favorite }),
+                },
+                {
+                  icon: '📌',
+                  label: n.pinned ? '取消置顶' : '置顶',
+                  onSelect: () => updateNote(n.id, { pinned: !n.pinned }),
+                },
+                {
+                  icon: '🏷',
+                  label: '添加标签…',
+                  sepBefore: true,
+                  onSelect: () => {
+                    setMoveTarget(n)
+                    setDialog('addTag')
+                  },
+                },
+                {
+                  icon: '🏷',
+                  label: '更改标签…',
+                  onSelect: () => {
+                    setMoveTarget(n)
+                    setDialog('editTag')
+                  },
+                },
+                {
+                  icon: '📁',
+                  label: '移动到文件夹…',
+                  onSelect: () => {
+                    setMoveTarget(n)
+                    setDialog('move')
+                  },
+                },
+                {
+                  icon: '📋',
+                  label: '复制标题',
+                  sepBefore: true,
+                  onSelect: () => {
+                    try {
+                      navigator.clipboard?.writeText(n.title || '')
+                      toast('标题已复制')
+                    } catch {
+                      toast('当前环境不支持剪贴板')
+                    }
+                  },
+                },
+                {
+                  icon: '📤',
+                  label: '导出为 Markdown',
+                  onSelect: () => {
+                    api
+                      .saveFile({
+                        defaultName: `${n.title || '笔记'}.md`,
+                        filters: [{ name: 'Markdown', extensions: ['md'] }],
+                        content: noteToMarkdown(n),
+                      })
+                      .then(() => toast('已导出 Markdown'))
+                      .catch(() => toast('导出已取消'))
+                  },
+                },
+                {
+                  icon: '🗑',
+                  label: '删除',
+                  danger: true,
+                  sepBefore: true,
+                  onSelect: () => void deleteNote(n.id),
+                },
+              ]}
+            />
+          )
+        })()}
 
       {printJob && (
         <PrintView

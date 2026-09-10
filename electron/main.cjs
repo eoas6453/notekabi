@@ -26,7 +26,10 @@ const BACKUP_DIR = 'backups'
 const SETTINGS_FILE = 'settings.json'
 const INDEX_FILE = 'index.json'
 const EVENTS_FILE = 'events.json' // 日历：工作节点与提醒
+const FOLDERS_FILE = 'folders.json' // 文件夹：独立于标签的分类体系
 const MAX_HISTORY = 5 // 每篇笔记保留的历史版本数
+// 索引结构版本号：元数据字段增删时 +1，自动让旧缓存失效重建
+const INDEX_VERSION = 2
 
 let mainWindow = null
 let storageRoot = ''
@@ -59,7 +62,7 @@ const DEFAULT_SETTINGS = {
   focusMode: false,
   dailyTemplate: 'daily',
   remindOnStart: true,
-  layout: { sidebar: true, list: true, listStyle: 'list' },
+  layout: { sidebar: true, list: true, listStyle: 'list', listCollapsed: false },
 }
 
 async function readSettings() {
@@ -95,6 +98,37 @@ async function readEvents() {
 async function writeEvents(list) {
   const safe = Array.isArray(list) ? list : []
   await atomicWrite(path.join(storageRoot, EVENTS_FILE), JSON.stringify(safe, null, 2))
+  return safe
+}
+
+// ---------------------------------------------------------------- 文件夹
+/**
+ * 文件夹独立于标签：用户自建树形结构，有序、可折叠。
+ * 存 folders.json（整体读写，量很小）；笔记侧只在 front-matter 记一个 folder id。
+ */
+async function readFolders() {
+  try {
+    const raw = await fsp.readFile(path.join(storageRoot, FOLDERS_FILE), 'utf8')
+    const list = JSON.parse(raw)
+    if (!Array.isArray(list)) return []
+    // 清洗：保证字段完整，剔除成环的父子关系（简单起见剔除指向自身的）
+    return list
+      .filter((f) => f && typeof f.id === 'string' && f.id)
+      .map((f, i) => ({
+        id: f.id,
+        name: String(f.name || '未命名文件夹').slice(0, 60),
+        parentId: f.parentId && f.parentId !== f.id ? f.parentId : null,
+        order: typeof f.order === 'number' ? f.order : i,
+        collapsed: !!f.collapsed,
+      }))
+  } catch {
+    return []
+  }
+}
+
+async function writeFolders(list) {
+  const safe = Array.isArray(list) ? list : []
+  await atomicWrite(path.join(storageRoot, FOLDERS_FILE), JSON.stringify(safe, null, 2))
   return safe
 }
 
@@ -146,6 +180,7 @@ function stringifyFrontMatter(meta) {
     `pinned: ${!!meta.pinned}`,
     `favorite: ${!!meta.favorite}`,
     `type: ${meta.type || 'note'}`,
+    `folder: ${meta.folder || ''}`,
     '---',
     '',
   ].join('\n')
@@ -170,6 +205,7 @@ function deserializeNote(id, raw, fallbackStat) {
     pinned: data.pinned === true || data.pinned === 'true',
     favorite: data.favorite === true || data.favorite === 'true',
     type: data.type || 'note',
+    folder: data.folder || '',
     content,
   }
 }
@@ -214,6 +250,8 @@ async function buildIndex() {
   } catch {
     cache = {}
   }
+  // 元数据字段结构变了（如新增 folder）时，整体重建缓存
+  if (cache.__v !== INDEX_VERSION) cache = {}
 
   const files = (await fsp.readdir(notesDir)).filter((f) => f.endsWith('.md'))
   const items = []
@@ -248,6 +286,7 @@ async function buildIndex() {
         pinned: note.pinned,
         favorite: note.favorite,
         type: note.type,
+        folder: note.folder || '',
         excerpt: makeExcerpt(note.content),
         words: countWords(note.content),
       }
@@ -258,6 +297,7 @@ async function buildIndex() {
     }
   }
 
+  nextCache.__v = INDEX_VERSION
   await fsp.writeFile(indexFile, JSON.stringify(nextCache), 'utf8').catch(() => {})
   return items
 }
@@ -496,6 +536,113 @@ function createWindow() {
         await clickByTitle('侧边栏')
         await clickByTitle('卡片')
         steps['7_layout'].restored = await exec(`!!document.querySelector('.sidebar') && !!document.querySelector('.list-pane') && !document.querySelector('.note-cards')`)
+
+        // ------------------------------------------------ 8. 文件夹模块
+        // 覆盖：文件夹在标签上方、默认一级「全部」、新建、重命名、折叠、缩略小球
+        steps['8_folder'] = {}
+        const folderSectionBefore = await exec(
+          `(function(){
+            const secs = Array.from(document.querySelectorAll('.sec-head .sec-label')).map((x) => x.textContent || '')
+            return JSON.stringify(secs)
+          })()`,
+        )
+        steps['8_folder'].sections = folderSectionBefore
+        steps['8_folder'].foldersAboveTags = await exec(
+          `(function(){
+            const secs = Array.from(document.querySelectorAll('.sec-head .sec-label')).map((x) => (x.textContent || '').replace(/（.*/, ''))
+            return secs.indexOf('文件夹') >= 0 && secs.indexOf('文件夹') < secs.indexOf('标签')
+          })()`,
+        )
+        steps['8_folder'].hasAllRow = await exec(
+          `(function(){
+            const rows = Array.from(document.querySelectorAll('.folder-row .folder-name')).map((x) => x.textContent)
+            return rows.indexOf('全部') === 0
+          })()`,
+        )
+        steps['8_folder'].noShounaTitle = await exec(`!document.body.innerText.includes('收纳')`)
+        // 新建文件夹（点 ＋ 后在弹窗里输入）
+        steps['8_folder'].newClicked = await exec(
+          `(function(){
+            const b = Array.from(document.querySelectorAll('.folder-head .icon-btn')).find((x) => x.title.includes('新建'))
+            if (b) { b.click(); return true }
+            return false
+          })()`,
+        )
+        await wait(320)
+        steps['8_folder'].promptShown = await exec(
+          `(function(){
+            const inp = document.querySelector('.dialog input')
+            if (!inp) return false
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+            setter.call(inp, '自检文件夹')
+            inp.dispatchEvent(new Event('input', { bubbles: true }))
+            const btn = Array.from(document.querySelectorAll('.dialog-foot .btn')).find((x) => x.textContent.includes('创建'))
+            if (btn) { btn.click(); return true }
+            return false
+          })()`,
+        )
+        await wait(420)
+        steps['8_folder'].created = await exec(
+          `(function(){
+            const rows = Array.from(document.querySelectorAll('.folder-row .folder-name')).map((x) => x.textContent)
+            return rows.indexOf('自检文件夹') >= 0
+          })()`,
+        )
+        // 折叠 / 展开文件夹分组
+        steps['8_folder'].sectionToggle = await exec(
+          `(function(){
+            const h = Array.from(document.querySelectorAll('.sec-head')).find((x) => (x.textContent || '').includes('标签'))
+            if (!h) return false
+            const before = !!document.querySelector('.sidebar-tags')
+            h.click()
+            return before
+          })()`,
+        )
+        // 笔记栏缩略成小球
+        steps['8_folder'].orbClicked = await exec(
+          `(function(){
+            const b = Array.from(document.querySelectorAll('.list-toolbar .icon-btn')).find((x) => (x.title || '').includes('小球'))
+            if (b) { b.click(); return true }
+            return false
+          })()`,
+        )
+        await wait(320)
+        steps['8_folder'].orbShown = await exec(`!!document.querySelector('.list-orb') && !document.querySelector('.list-pane')`)
+        await exec(`(function(){ const o = document.querySelector('.list-orb'); if (o) o.click(); return true })()`)
+        await wait(320)
+        steps['8_folder'].orbRestored = await exec(`!!document.querySelector('.list-pane')`)
+
+        // 清理自检建的文件夹
+        const createdFolders = await readFolders()
+        await writeFolders(createdFolders.filter((f) => f.name !== '自检文件夹'))
+
+        // ------------------------------------------------ 9. 关系图谱 / 标签云
+        steps['9_graph'] = {}
+        const clickNav = async (kw) => {
+          const ok = await exec(
+            `(function(){
+              const b = Array.from(document.querySelectorAll('.nav-item')).find((x) => (x.textContent || '').includes(${JSON.stringify(kw)}))
+              if (b) { b.click(); return true }
+              return false
+            })()`,
+          )
+          await wait(260)
+          return ok
+        }
+        steps['9_graph'].opened = await clickNav('关系图谱')
+        await wait(1400) // 等力导向跑一会儿
+        steps['9_graph'].nodeCount = await exec(`document.querySelectorAll('.graph-node').length`)
+        steps['9_graph'].stat = await exec(`(document.querySelector('.graph-stat') || {}).textContent || ''`)
+        steps['9_graph'].cloudClicked = await exec(
+          `(function(){
+            const b = Array.from(document.querySelectorAll('.g-tab')).find((x) => (x.textContent || '').includes('标签云'))
+            if (b) { b.click(); return true }
+            return false
+          })()`,
+        )
+        await wait(300)
+        steps['9_graph'].cloudShown = await exec(`!!document.querySelector('.tag-cloud')`)
+        await clickNav('全部笔记')
 
         steps.ok = true
 
@@ -772,6 +919,7 @@ handle('import:folder', async () => {
           pinned: false,
           favorite: false,
           type: 'note',
+          folder: (parsed.data && parsed.data.folder) || '',
           content: parsed.content,
         }
         await atomicWrite(path.join(storageRoot, NOTES_DIR, `${id}.md`), serializeNote(note))
@@ -805,6 +953,10 @@ handle('app:readFile', async (absPath, encoding) => {
 // ---------------------------------------------------------------- 日历事件
 handle('events:list', async () => readEvents())
 handle('events:saveAll', async (list) => writeEvents(list))
+
+// ---------------------------------------------------------------- 文件夹
+handle('folders:list', async () => readFolders())
+handle('folders:saveAll', async (list) => writeFolders(list))
 
 /** 系统通知：用于到期提醒（失败不影响应用） */
 handle('notify:send', async ({ title, body }) => {
