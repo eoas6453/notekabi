@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { ViewKey } from '../types'
 import type { ReactNode } from 'react'
 import ContextMenu from './ContextMenu'
+import { NOTE_DND } from './FolderTree'
 
 interface Props {
   view: ViewKey
@@ -32,6 +33,10 @@ interface Props {
   onToggleIncludeSubfolders?: () => void
   /** 删除标签（仅移除笔记上的该标签，不删除笔记） */
   onDeleteTag?: (tag: string) => void
+  /** 重命名标签（弹窗由父组件处理） */
+  onRenameTag?: (tag: string) => void
+  /** 把一篇笔记拖到标签上 → 给该笔记加上此标签 */
+  onAddTagToNote?: (noteId: string, tag: string) => void
 }
 
 const NAV: { key: ViewKey; icon: string; label: string }[] = [
@@ -120,6 +125,8 @@ export default function Sidebar(p: Props) {
   const [dragging, setDragging] = useState(false)
   /** 标签右键菜单 */
   const [tagMenu, setTagMenu] = useState<{ x: number; y: number; tag: string } | null>(null)
+  /** 正在拖入笔记的标签（高亮提示） */
+  const [hoverTag, setHoverTag] = useState<string | null>(null)
   const asideRef = useRef<HTMLElement>(null)
   const foldersRef = useRef<HTMLDivElement>(null)
   const tagsRef = useRef<HTMLDivElement>(null)
@@ -287,15 +294,37 @@ export default function Sidebar(p: Props) {
           {p.tags.map((t) => (
             <button
               key={t.name}
-              className={`tag-chip ${p.activeTags.includes(t.name) ? 'active' : ''}`}
+              className={`tag-chip ${p.activeTags.includes(t.name) ? 'active' : ''} ${
+                hoverTag === t.name ? 'drop' : ''
+              }`}
               onClick={() => p.onToggleTag(t.name)}
               onContextMenu={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 setTagMenu({ x: e.clientX, y: e.clientY, tag: t.name })
               }}
+              onDragOver={(e) => {
+                if (Array.from(e.dataTransfer.types).includes(NOTE_DND)) {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                  if (hoverTag !== t.name) setHoverTag(t.name)
+                }
+              }}
+              onDragLeave={() => {
+                if (hoverTag === t.name) setHoverTag(null)
+              }}
+              onDrop={(e) => {
+                const noteId = e.dataTransfer.getData(NOTE_DND)
+                if (noteId) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  p.onAddTagToNote?.(noteId, t.name)
+                }
+                setHoverTag(null)
+              }}
               title={
-                (p.activeTags.length > 0 ? '点击可组合筛选 · ' : '') + '右键可删除该标签'
+                (p.activeTags.length > 0 ? '点击可组合筛选 · ' : '') +
+                '右键可重命名/删除 · 拖笔记到此处可打此标签'
               }
             >
               {t.name}
@@ -327,6 +356,14 @@ export default function Sidebar(p: Props) {
           title={`#${tagMenu.tag}`}
           onClose={() => setTagMenu(null)}
           items={[
+            {
+              icon: '✎',
+              label: '重命名标签',
+              onSelect: () => {
+                p.onRenameTag?.(tagMenu.tag)
+                setTagMenu(null)
+              },
+            },
             {
               icon: '🗑',
               label: '删除标签',

@@ -637,6 +637,13 @@ select {
   font-size: 10px;
   opacity: 0.7;
 }
+/* 拖笔记到标签上时高亮（落点提示） */
+.tag-chip.drop {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 
 .sidebar-foot {
   border-top: 1px solid var(--border);

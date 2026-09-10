@@ -98,8 +98,11 @@ export default function App() {
     | 'renameFolder'
     | 'addTag'
     | 'editTag'
+    | 'renameTag'
   >(null)
   const [moveTarget, setMoveTarget] = useState<Note | null>(null)
+  /** 重命名标签时的旧名（用于弹窗） */
+  const [renameTagTarget, setRenameTagTarget] = useState<string | null>(null)
   /** 右键菜单：笔记（在鼠标位置弹出功能框） */
   const [noteMenu, setNoteMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   /** 文件夹树（与标签完全独立）：有序、可嵌套、可折叠 */
@@ -340,6 +343,38 @@ export default function App() {
       affected.forEach((n) => updateNote(n.id, { tags: n.tags.filter((t) => t !== tag) }))
       setActiveTags((ts) => ts.filter((t) => t !== tag))
       toast(`已删除标签 #${tag}：清理了 ${affected.length} 篇笔记上的该标签（笔记未删除）`)
+    },
+    [notes, updateNote, toast],
+  )
+
+  /** 重命名标签：更新所有相关笔记的 tags；若新名已存在则合并 */
+  const renameTag = useCallback(
+    (oldName: string, newNameRaw: string) => {
+      const newName = newNameRaw.trim()
+      if (!newName || newName === oldName) return
+      const affected = notes.filter((n) => n.tags.includes(oldName))
+      affected.forEach((n) => {
+        const tags = n.tags.filter((t) => t !== oldName)
+        if (!tags.includes(newName)) tags.push(newName)
+        updateNote(n.id, { tags })
+      })
+      setActiveTags((ts) => ts.map((t) => (t === oldName ? newName : t)))
+      toast(`已将标签 #${oldName} 重命名为 #${newName}（${affected.length} 篇）`)
+    },
+    [notes, updateNote, toast],
+  )
+
+  /** 给某篇笔记加上标签（拖笔记到侧栏标签时用到） */
+  const addTagToNote = useCallback(
+    (noteId: string, tag: string) => {
+      const n = notes.find((x) => x.id === noteId)
+      if (!n) return
+      if (n.tags.includes(tag)) {
+        toast(`「${n.title || '无标题笔记'}」已有标签 #${tag}`)
+        return
+      }
+      updateNote(noteId, { tags: [...n.tags, tag] })
+      toast(`已给「${n.title || '无标题笔记'}」加上 #${tag}`)
     },
     [notes, updateNote, toast],
   )
@@ -931,6 +966,11 @@ export default function App() {
           includeSubfolders={includeSubfolders}
           onToggleIncludeSubfolders={() => setIncludeSubfolders((v) => !v)}
           onDeleteTag={deleteTag}
+          onRenameTag={(t) => {
+            setRenameTagTarget(t)
+            setDialog('renameTag')
+          }}
+          onAddTagToNote={addTagToNote}
         />
       )}
 
@@ -1250,6 +1290,25 @@ export default function App() {
           onClose={() => {
             setDialog(null)
             setMoveTarget(null)
+          }}
+        />
+      )}
+
+      {dialog === 'renameTag' && renameTagTarget && (
+        <PromptDialog
+          title={`重命名标签 #${renameTagTarget}`}
+          label="新标签名"
+          defaultValue={renameTagTarget}
+          placeholder="输入新的标签名"
+          confirmText="重命名"
+          onOk={(v) => {
+            renameTag(renameTagTarget, v)
+            setDialog(null)
+            setRenameTagTarget(null)
+          }}
+          onClose={() => {
+            setDialog(null)
+            setRenameTagTarget(null)
           }}
         />
       )}
