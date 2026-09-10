@@ -3,6 +3,7 @@ import type { Note } from '../types'
 import { formatRelative } from '../lib/date'
 import { highlightParts } from '../lib/search'
 import { makeExcerpt } from '../lib/note'
+import { TAG_DND } from './FolderTree'
 
 export interface ListItem {
   note: Note
@@ -30,6 +31,8 @@ interface Props {
   onContextMenu?: (e: React.MouseEvent, noteId: string) => void
   /** 点击右上「收起」：整栏缩略成左侧小球 */
   onCollapse?: () => void
+  /** 把侧栏标签拖到某条笔记上 → 给该笔记加上此标签 */
+  onDropTag?: (noteId: string, tag: string) => void
 }
 
 /** 高亮文本片段 */
@@ -76,10 +79,25 @@ export default function NoteList(p: Props) {
     return (
       <div
         key={n.id}
+        data-id={n.id}
         className={`note-item ${active ? 'active' : ''}`}
         onClick={() => p.onOpen(n.id)}
         draggable
         onDragStart={(e) => startNoteDrag(e, n.id)}
+        onDragOver={(e) => {
+          if (Array.from(e.dataTransfer.types).includes(TAG_DND)) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'copy'
+          }
+        }}
+        onDrop={(e) => {
+          const tag = e.dataTransfer.getData(TAG_DND)
+          if (tag) {
+            e.preventDefault()
+            e.stopPropagation()
+            p.onDropTag?.(n.id, tag)
+          }
+        }}
         onContextMenu={(e) => {
           if (!p.onContextMenu) return
           e.preventDefault()
@@ -117,10 +135,25 @@ export default function NoteList(p: Props) {
     return (
       <div
         key={n.id}
+        data-id={n.id}
         className={`note-card ${active ? 'active' : ''}`}
         onClick={() => p.onOpen(n.id)}
         draggable
         onDragStart={(e) => startNoteDrag(e, n.id)}
+        onDragOver={(e) => {
+          if (Array.from(e.dataTransfer.types).includes(TAG_DND)) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'copy'
+          }
+        }}
+        onDrop={(e) => {
+          const tag = e.dataTransfer.getData(TAG_DND)
+          if (tag) {
+            e.preventDefault()
+            e.stopPropagation()
+            p.onDropTag?.(n.id, tag)
+          }
+        }}
         onContextMenu={(e) => {
           if (!p.onContextMenu) return
           e.preventDefault()

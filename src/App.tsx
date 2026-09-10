@@ -1002,6 +1002,7 @@ export default function App() {
           }
           onContextMenu={(e, id) => setNoteMenu({ x: e.clientX, y: e.clientY, id })}
           onCollapse={() => setLayout({ listCollapsed: true })}
+          onDropTag={addTagToNote}
         />
       )}
 

@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import type { ViewKey } from '../types'
 import type { ReactNode } from 'react'
 import ContextMenu from './ContextMenu'
-import { NOTE_DND } from './FolderTree'
+import { NOTE_DND, TAG_DND } from './FolderTree'
 
 interface Props {
   view: ViewKey
@@ -298,6 +298,13 @@ export default function Sidebar(p: Props) {
                 hoverTag === t.name ? 'drop' : ''
               }`}
               onClick={() => p.onToggleTag(t.name)}
+              onDoubleClick={() => p.onRenameTag?.(t.name)}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(TAG_DND, t.name)
+                e.dataTransfer.effectAllowed = 'copy'
+                e.stopPropagation()
+              }}
               onContextMenu={(e) => {
                 e.preventDefault()
                 e.stopPropagation()

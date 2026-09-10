@@ -6,6 +6,7 @@ import ContextMenu from './ContextMenu'
 export type DropPos = 'before' | 'after' | 'inside'
 export const NOTE_DND = 'application/x-notekabi-note'
 export const FOLDER_DND = 'application/x-notekabi-folder'
+export const TAG_DND = 'application/x-notekabi-tag'
 
 interface Props {
   /** 树形结构（已带笔记计数） */
