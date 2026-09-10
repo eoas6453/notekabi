@@ -107,7 +107,7 @@ export default function App() {
   /** 新建 / 重命名文件夹时的上下文 */
   const [folderCtx, setFolderCtx] = useState<{ parentId: string | null; id?: string; name?: string } | null>(null)
   /** 侧栏各分组的折叠状态（存 localStorage，属纯 UI 偏好） */
-  const [sections, setSections] = useState<Record<string, boolean>>({ tags: true })
+  const [sections, setSections] = useState<Record<string, boolean>>({})
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([])
   const [printJob, setPrintJob] = useState<{ html: string; name: string } | null>(null)
   const [showBacklinks, setShowBacklinks] = useState(true)
@@ -482,6 +482,15 @@ export default function App() {
     if (!includeSubfolders) return new Set([activeFolder])
     return new Set(descendantIds(folderTree, activeFolder))
   }, [activeFolder, includeSubfolders, folderTree])
+
+  /**
+   * 弹窗里展示的笔记始终取最新数据：
+   * 否则在「更改标签」里新增标签后，弹窗拿到的还是打开时的旧快照，看起来像没生效。
+   */
+  const dialogNote = useMemo(
+    () => (moveTarget ? notes.find((n) => n.id === moveTarget.id) || moveTarget : null),
+    [moveTarget, notes],
+  )
 
   /** 文件夹改动落盘（folders.json） */
   const persistFolders = useCallback(
@@ -899,11 +908,13 @@ export default function App() {
               onMoveFolder={moveFolder}
               onDropNote={dropNoteToFolder}
               includeSubfolders={includeSubfolders}
-              onToggleIncludeSubfolders={() => setIncludeSubfolders((v) => !v)}
               totalCount={notes.length}
               unclassifiedCount={unclassifiedCount}
             />
           }
+          onNewFolder={() => createFolder(null)}
+          includeSubfolders={includeSubfolders}
+          onToggleIncludeSubfolders={() => setIncludeSubfolders((v) => !v)}
         />
       )}
 
@@ -1178,7 +1189,7 @@ export default function App() {
 
       {dialog === 'move' && (
         <MoveToDialog
-          note={moveTarget}
+          note={dialogNote}
           folders={flatFolders.map((f) => ({ id: f.id, label: f.name, depth: f.depth }))}
           onMove={(folderId) => moveTarget && moveNoteToFolder(moveTarget.id, folderId)}
           onClose={() => {
@@ -1207,18 +1218,18 @@ export default function App() {
         />
       )}
 
-      {dialog === 'editTag' && moveTarget && (
+      {dialog === 'editTag' && dialogNote && (
         <TagDialog
-          note={moveTarget}
+          note={dialogNote}
           allTags={tagStats.map((t) => t.name)}
           onToggle={(tag) => {
-            const has = moveTarget.tags.includes(tag)
-            updateNote(moveTarget.id, {
-              tags: has ? moveTarget.tags.filter((x) => x !== tag) : [...moveTarget.tags, tag],
+            const has = dialogNote.tags.includes(tag)
+            updateNote(dialogNote.id, {
+              tags: has ? dialogNote.tags.filter((x) => x !== tag) : [...dialogNote.tags, tag],
             })
           }}
           onAdd={(tag) => {
-            if (!moveTarget.tags.includes(tag)) updateNote(moveTarget.id, { tags: [...moveTarget.tags, tag] })
+            if (!dialogNote.tags.includes(tag)) updateNote(dialogNote.id, { tags: [...dialogNote.tags, tag] })
           }}
           onClose={() => {
             setDialog(null)

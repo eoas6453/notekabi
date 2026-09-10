@@ -608,6 +608,21 @@ export function TagDialog({
   onClose: () => void
 }) {
   const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  // 弹窗打开后自动聚焦输入框，否则焦点还在页面上，直接打字会丢失
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    })
+  }, [])
+  const addTag = () => {
+    const name = draft.trim()
+    if (!name) return
+    onAdd(name)
+    setDraft('')
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
   return (
     <Dialog title={`更改标签 · 「${note.title || '无标题笔记'}」`} onClose={onClose}>
       <div className="field">
@@ -640,25 +655,18 @@ export function TagDialog({
         <span className="field-label">新建标签</span>
         <div className="row">
           <input
+            ref={inputRef}
             value={draft}
             placeholder="输入新标签后回车"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && draft.trim()) {
-                onAdd(draft.trim())
-                setDraft('')
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addTag()
               }
             }}
           />
-          <button
-            className="btn"
-            onClick={() => {
-              if (draft.trim()) {
-                onAdd(draft.trim())
-                setDraft('')
-              }
-            }}
-          >
+          <button className="btn" onClick={addTag}>
             添加
           </button>
         </div>

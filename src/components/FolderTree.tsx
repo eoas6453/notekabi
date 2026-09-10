@@ -20,7 +20,6 @@ interface Props {
   onMoveFolder: (dragId: string, targetId: string | null, pos: DropPos) => void
   onDropNote: (noteId: string, folderId: string | null) => void
   includeSubfolders: boolean
-  onToggleIncludeSubfolders: () => void
   totalCount: number
   unclassifiedCount: number
 }
@@ -196,20 +195,6 @@ export default function FolderTree(p: Props) {
         else if (folderId) p.onMoveFolder(folderId, null, 'after')
       }}
     >
-      <div className="folder-head">
-        <span className="spacer" />
-        <button className="icon-btn" title="新建一级文件夹" onClick={() => p.onCreate(null)}>
-          ＋
-        </button>
-        <button
-          className={`icon-btn ${p.includeSubfolders ? 'active' : ''}`}
-          title="选中文件夹时同时显示子文件夹的笔记"
-          onClick={p.onToggleIncludeSubfolders}
-        >
-          ↘
-        </button>
-      </div>
-
       <div
         className={`folder-row all ${p.activeFolder === null ? 'active' : ''}`}
         onClick={() => p.onSelect(null)}

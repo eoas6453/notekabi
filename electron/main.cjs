@@ -563,7 +563,7 @@ function createWindow() {
         // 新建文件夹（点 ＋ 后在弹窗里输入）
         steps['8_folder'].newClicked = await exec(
           `(function(){
-            const b = Array.from(document.querySelectorAll('.folder-head .icon-btn')).find((x) => x.title.includes('新建'))
+            const b = Array.from(document.querySelectorAll('.sec-head .sec-btn')).find((x) => (x.title || '').includes('新建'))
             if (b) { b.click(); return true }
             return false
           })()`,
@@ -586,6 +586,50 @@ function createWindow() {
           `(function(){
             const rows = Array.from(document.querySelectorAll('.folder-row .folder-name')).map((x) => x.textContent)
             return rows.indexOf('自检文件夹') >= 0
+          })()`,
+        )
+        // 文件夹栏标题行右侧：＋ / ↘ 两个按钮与标题等高
+        steps['8_folder'].headBtns = await exec(
+          `(function(){
+            const h = Array.from(document.querySelectorAll('.sec-head')).find((x) => (x.textContent || '').includes('文件夹'))
+            if (!h) return 'no-head'
+            const btns = Array.from(h.querySelectorAll('.sec-btn'))
+            const label = h.querySelector('.sec-label')
+            if (!btns.length || !label) return 'no-btn'
+            const lt = label.getBoundingClientRect()
+            const same = btns.every((b) => {
+              const r = b.getBoundingClientRect()
+              return Math.abs(r.top - lt.top) <= 8 && Math.abs(r.bottom - lt.bottom) <= 8
+            })
+            return JSON.stringify({ n: btns.length, sameRow: same, noFolderHead: !document.querySelector('.folder-head') })
+          })()`,
+        )
+        // 文件夹 / 标签 之间的可拖动分隔条
+        steps['8_folder'].splitBefore = await exec(
+          `(function(){
+            const sp = document.querySelector('.sec-split')
+            if (!sp) return -1
+            const g = Array.from(document.querySelectorAll('.nav-group')).find((x) => x.querySelector('.sidebar-folders'))
+            const r = sp.getBoundingClientRect()
+            window.__spEvent = (t, dy) => new PointerEvent(t, {
+              bubbles: true, clientX: r.left + r.width / 2,
+              clientY: r.top + r.height / 2 + dy, pointerId: 1,
+            })
+            sp.dispatchEvent(window.__spEvent('pointerdown', 0))
+            sp.dispatchEvent(window.__spEvent('pointermove', 60))
+            sp.dispatchEvent(window.__spEvent('pointerup', 60))
+            return g ? Math.round(g.getBoundingClientRect().height) : -1
+          })()`,
+        )
+        await wait(320)
+        steps['8_folder'].splitAfter = await exec(
+          `(function(){
+            const g = Array.from(document.querySelectorAll('.nav-group')).find((x) => x.querySelector('.sidebar-folders'))
+            const h = g ? Math.round(g.getBoundingClientRect().height) : -1
+            const sp = document.querySelector('.sec-split')
+            if (sp) sp.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+            try { localStorage.removeItem('notekabi.sidebar.folderH') } catch (e) {}
+            return h
           })()`,
         )
         // 折叠 / 展开文件夹分组
