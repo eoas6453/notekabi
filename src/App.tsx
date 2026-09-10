@@ -329,6 +329,21 @@ export default function App() {
     [notes, scheduleSave],
   )
 
+  /** 删除标签：仅从所有笔记的 tags 里移除，不删除任何笔记本身 */
+  const deleteTag = useCallback(
+    (tag: string) => {
+      const affected = notes.filter((n) => n.tags.includes(tag))
+      if (affected.length === 0) {
+        toast(`标签 #${tag} 下没有笔记`)
+        return
+      }
+      affected.forEach((n) => updateNote(n.id, { tags: n.tags.filter((t) => t !== tag) }))
+      setActiveTags((ts) => ts.filter((t) => t !== tag))
+      toast(`已删除标签 #${tag}：清理了 ${affected.length} 篇笔记上的该标签（笔记未删除）`)
+    },
+    [notes, updateNote, toast],
+  )
+
   const createNote = useCallback(
     (init?: Partial<Note>) => {
       const now = new Date().toISOString()
@@ -915,6 +930,7 @@ export default function App() {
           onNewFolder={() => createFolder(null)}
           includeSubfolders={includeSubfolders}
           onToggleIncludeSubfolders={() => setIncludeSubfolders((v) => !v)}
+          onDeleteTag={deleteTag}
         />
       )}
 

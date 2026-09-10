@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ViewKey } from '../types'
 import type { ReactNode } from 'react'
+import ContextMenu from './ContextMenu'
 
 interface Props {
   view: ViewKey
@@ -29,6 +30,8 @@ interface Props {
   /** 是否包含子文件夹的笔记 */
   includeSubfolders?: boolean
   onToggleIncludeSubfolders?: () => void
+  /** 删除标签（仅移除笔记上的该标签，不删除笔记） */
+  onDeleteTag?: (tag: string) => void
 }
 
 const NAV: { key: ViewKey; icon: string; label: string }[] = [
@@ -115,6 +118,8 @@ export default function Sidebar(p: Props) {
   /** 文件夹区域高度（null = 自动等分）；拖动分隔条后固定，存 localStorage */
   const [folderH, setFolderH] = useState<number | null>(readH)
   const [dragging, setDragging] = useState(false)
+  /** 标签右键菜单 */
+  const [tagMenu, setTagMenu] = useState<{ x: number; y: number; tag: string } | null>(null)
   const asideRef = useRef<HTMLElement>(null)
   const foldersRef = useRef<HTMLDivElement>(null)
   const tagsRef = useRef<HTMLDivElement>(null)
@@ -257,19 +262,17 @@ export default function Sidebar(p: Props) {
         <div className="sidebar-folders">{p.folderTree}</div>
       </Section>
 
-      {!p.collapsed.tags && (
-        <div
-          className={`sec-split ${dragging ? 'dragging' : ''}`}
-          title="拖动调整「文件夹」与「标签」的高度 · 双击恢复自动等分"
-          onPointerDown={onSplitDown}
-          onPointerMove={onSplitMove}
-          onPointerUp={onSplitUp}
-          onPointerCancel={onSplitUp}
-          onDoubleClick={resetSplit}
-        >
-          <span className="sec-split-bar" />
-        </div>
-      )}
+      <div
+        className={`sec-split ${dragging ? 'dragging' : ''}`}
+        title="拖动调整「文件夹」与「标签」的高度 · 双击恢复自动等分"
+        onPointerDown={onSplitDown}
+        onPointerMove={onSplitMove}
+        onPointerUp={onSplitUp}
+        onPointerCancel={onSplitUp}
+        onDoubleClick={resetSplit}
+      >
+        <span className="sec-split-bar" />
+      </div>
 
       <Section
         id="tags"
@@ -286,7 +289,14 @@ export default function Sidebar(p: Props) {
               key={t.name}
               className={`tag-chip ${p.activeTags.includes(t.name) ? 'active' : ''}`}
               onClick={() => p.onToggleTag(t.name)}
-              title={p.activeTags.length > 0 ? '点击可组合筛选' : ''}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setTagMenu({ x: e.clientX, y: e.clientY, tag: t.name })
+              }}
+              title={
+                (p.activeTags.length > 0 ? '点击可组合筛选 · ' : '') + '右键可删除该标签'
+              }
             >
               {t.name}
               <span className="n">{t.count}</span>
@@ -309,6 +319,26 @@ export default function Sidebar(p: Props) {
           {p.storagePath}
         </div>
       </div>
+
+      {tagMenu && (
+        <ContextMenu
+          x={tagMenu.x}
+          y={tagMenu.y}
+          title={`#${tagMenu.tag}`}
+          onClose={() => setTagMenu(null)}
+          items={[
+            {
+              icon: '🗑',
+              label: '删除标签',
+              danger: true,
+              onSelect: () => {
+                p.onDeleteTag?.(tagMenu.tag)
+                setTagMenu(null)
+              },
+            },
+          ]}
+        />
+      )}
     </aside>
   )
 }
