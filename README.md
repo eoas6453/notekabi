@@ -2,8 +2,7 @@
 
 本地优先的个人工作笔记工具。快速记录、方便整理、便于回顾，完全离线运行，数据以 Markdown 文件存在你自己的电脑里。
 
-![Uploading Snipaste_2026-09-11_19-09-20.jpg…]()
-
+![]([http://www.baidu.com/img/bdlogo.gif](https://github.com/eoas6453/notekabi/blob/master/Interface.jpg))  
 
 
 > 三栏布局 · 深色/浅色主题 · 键盘优先 · 自动保存
