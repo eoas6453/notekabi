@@ -14,7 +14,7 @@
 
 ### 方式 A：直接用现成的便携版
 
-1. 下载 ` -v1.1.0-Windows-x64-.-20260910.zip ` 解压 到任意目录
+1. 下载 [v1.1.0-Windows-x64-.-20260910.zip](https://github.com/eoas6453/notekabi/releases/tag/v1.1.0) 解压 到任意目录
 2. 双击 `工作笔记.exe`
 3. 完事。无需安装、无需 Node、无需联网
 
