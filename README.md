@@ -3,7 +3,6 @@
 本地优先的个人工作笔记工具。快速记录、方便整理、便于回顾，完全离线运行，数据以 Markdown 文件存在你自己的电脑里。
 
 
-
 ![](https://github.com/eoas6453/notekabi/blob/4863f3a6c8c7d0e8d9a5f643626f04b8e7131a20/Interface.jpg)  
 
 
@@ -18,8 +17,6 @@
 1. 下载 [v1.1.0-Windows-x64-.-20260910.zip](https://github.com/eoas6453/notekabi/releases/tag/v1.1.0) 解压 到任意目录
 2. 双击 `工作笔记.exe`
 3. 完事。无需安装、无需 Node、无需联网
-
-> 历史版本 `工作笔记-v1.0.0-Windows-x64-便携版.zip` 作为旧版备份一并保留在 `build/` 下，可随时取用。
 
 ### 方式 B：从源码运行（开发者）
 
