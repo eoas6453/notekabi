@@ -3,9 +3,8 @@
 本地优先的个人工作笔记工具。快速记录、方便整理、便于回顾，完全离线运行，数据以 Markdown 文件存在你自己的电脑里。
 
 
-https://github.com/eoas6453/notekabi/blob/4863f3a6c8c7d0e8d9a5f643626f04b8e7131a20/Interface.jpg
 
-![](https://github.com/guodongxiaren/ImageCache/raw/master/Logo/foryou.gif)  
+![](https://github.com/eoas6453/notekabi/blob/4863f3a6c8c7d0e8d9a5f643626f04b8e7131a20/Interface.jpg)  
 
 
 > 三栏布局 · 深色/浅色主题 · 键盘优先 · 自动保存
