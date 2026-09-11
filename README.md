@@ -1,8 +1,9 @@
-# 工作笔记 · Notekabi
+# · Notekabi -开源个人笔记 + 知识图谱管理工具
 
 本地优先的个人工作笔记工具。快速记录、方便整理、便于回顾，完全离线运行，数据以 Markdown 文件存在你自己的电脑里。
 
-![界面](docs/screenshot-placeholder.png)
+![Uploading image.png…]()
+
 
 > 三栏布局 · 深色/浅色主题 · 键盘优先 · 自动保存
 
